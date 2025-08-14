@@ -1,0 +1,46 @@
+# Harbor Container Updater - Development Docker Compose
+# For local development with hot reload and debugging
+
+
+services:
+  harbor-dev:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.dev
+    container_name: harbor-dev
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount source code for hot reload
+      - ../..:/app
+      # Mount Docker socket for container discovery
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Persistent data
+      - harbor_dev_data:/app/data
+      - harbor_dev_logs:/app/logs
+    environment:
+      - HARBOR_MODE=development
+      - LOG_LEVEL=DEBUG
+      - DATABASE_URL=sqlite:///data/harbor_dev.db
+      - ENABLE_AUTO_DISCOVERY=true
+      - DEV_RELOAD=true
+    labels:
+      - "harbor.exclude=true"  # Don't update Harbor itself
+      - "com.harbor.environment=development"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  harbor_dev_data:
+    driver: local
+  harbor_dev_logs:
+    driver: local
+
+networks:
+  default:
+    name: harbor-dev-network

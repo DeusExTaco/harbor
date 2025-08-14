@@ -1,0 +1,13 @@
+# Harbor Container Updater - Production Dependencies
+# Additional dependencies for enterprise/production deployments
+
+-r base.txt
+
+# Production database drivers
+psycopg2-binary>=2.9.0
+
+# Caching and sessions
+redis>=5.0.0
+
+# Production WSGI server
+gunicorn>=21.2.0

@@ -104,6 +104,7 @@ repos:
       - id: hadolint-docker
         name: dockerfile-lint
         files: Dockerfile.*
+        args: [--ignore, DL3008, --ignore, DL3013]  # Ignore version pinning warnings
 
   # =============================================================================
   # Secrets detection

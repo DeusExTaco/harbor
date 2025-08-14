@@ -74,3 +74,7 @@ Thumbs.db
 bandit-report.json
 safety-report.json
 *.security-report
+
+# Docker artifacts
+.docker/
+**/docker-compose.override.yml

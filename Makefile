@@ -136,6 +136,9 @@ docker-build: ## Build development Docker image
 docker-build-prod: ## Build production Docker image
 	docker build -t harbor:latest -f deploy/docker/Dockerfile .
 
+docker-build-multi: ## Build multi-architecture images locally
+	./scripts/build.sh
+
 docker-run: ## Run Harbor in Docker container
 	docker run -d --name harbor-dev \
 		-p 8080:8080 \
@@ -143,15 +146,51 @@ docker-run: ## Run Harbor in Docker container
 		-v $$(pwd)/data:/app/data \
 		harbor:dev
 
+docker-run-prod: ## Run production Harbor container
+	docker run -d --name harbor-prod \
+		-p 8080:8080 \
+		-v /var/run/docker.sock:/var/run/docker.sock:ro \
+		-v harbor-data:/app/data \
+		harbor:latest
+
 docker-stop: ## Stop and remove development container
 	docker stop harbor-dev || true
 	docker rm harbor-dev || true
 
+docker-stop-prod: ## Stop and remove production container
+	docker stop harbor-prod || true
+	docker rm harbor-prod || true
+
 docker-logs: ## Show Docker container logs
 	docker logs -f harbor-dev
 
+docker-logs-prod: ## Show production container logs
+	docker logs -f harbor-prod
+
 docker-shell: ## Open shell in running container
 	docker exec -it harbor-dev /bin/bash
+
+docker-shell-prod: ## Open shell in production container
+	docker exec -it harbor-prod /bin/bash
+
+docker-health: ## Check Docker container health status
+	@echo "Checking Harbor container health..."
+	@docker inspect harbor-dev --format='{{.State.Health.Status}}' 2>/dev/null || echo "Container not running"
+	@docker exec harbor-dev curl -f http://localhost:8080/healthz 2>/dev/null && echo "✅ Health check passed" || echo "❌ Health check failed"
+
+docker-health-prod: ## Check production container health
+	@echo "Checking Harbor production container health..."
+	@docker inspect harbor-prod --format='{{.State.Health.Status}}' 2>/dev/null || echo "Container not running"
+	@docker exec harbor-prod curl -f http://localhost:8080/healthz 2>/dev/null && echo "✅ Health check passed" || echo "❌ Health check failed"
+
+docker-compose-dev: ## Start development environment with Docker Compose
+	docker-compose -f deploy/docker/docker-compose.dev.yml up -d
+
+docker-compose-logs: ## Show Docker Compose logs
+	docker-compose -f deploy/docker/docker-compose.dev.yml logs -f
+
+docker-compose-down: ## Stop Docker Compose environment
+	docker-compose -f deploy/docker/docker-compose.dev.yml down
 
 # =============================================================================
 # Project Maintenance
@@ -171,7 +210,7 @@ clean: ## Clean build artifacts and temporary files
 	find . -type f -name "*.pyc" -delete
 	@echo "Clean complete!"
 
-clean-docker: ## Clean Docker images and containers
+docker-clean: ## Clean Docker images and containers
 	docker system prune -f
 	docker image prune -f
 
@@ -221,7 +260,6 @@ env-info: ## Show development environment information
 	@echo "- pytest: $$(pytest --version | head -1 || echo 'Not installed')"
 	@echo "- ruff: $$(ruff --version || echo 'Not installed')"
 	@echo "- mypy: $$(mypy --version || echo 'Not installed')"
-	@echo "- black: $$(black --version || echo 'Not installed')"
 
 check: ## Run all quality checks (lint, type check, test)
 	@echo "Running complete quality check..."

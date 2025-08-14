@@ -1,0 +1,203 @@
+name: Docker Multi-Architecture Build
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Rebuild weekly to get security updates
+    - cron: '0 0 * * 0'
+
+env:
+  REGISTRY_IMAGE_GHCR: ghcr.io/deusextaco/harbor
+
+jobs:
+  # =============================================================================
+  # Build Matrix for Multiple Architectures
+  # =============================================================================
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+          - linux/arm/v7
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE_GHCR }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=dev,enable={{is_default_branch}}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: ${{ matrix.platform }}
+          target: production
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE_GHCR }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILDPLATFORM=linux/amd64
+            TARGETPLATFORM=${{ matrix.platform }}
+
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.platform }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # =============================================================================
+  # Merge Multi-Architecture Manifests
+  # =============================================================================
+  merge:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE_GHCR }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Create manifest list and push to GHCR
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY_IMAGE_GHCR }}@sha256:%s ' *)
+
+      - name: Inspect GHCR image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE_GHCR }}:${{ steps.meta.outputs.version }}
+
+  # =============================================================================
+  # Test Multi-Architecture Images
+  # =============================================================================
+  test:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    needs: merge
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+
+    steps:
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE_GHCR }}
+
+      - name: Test image
+        run: |
+          docker run --rm --platform ${{ matrix.platform }} \
+            ${{ env.REGISTRY_IMAGE_GHCR }}:${{ steps.meta.outputs.version }} \
+            python -c "
+            import app
+            print('✅ Harbor imports successfully on ${{ matrix.platform }}')
+            print('✅ Platform: ${{ matrix.platform }}')
+            print('✅ Image: ${{ env.REGISTRY_IMAGE_GHCR }}:${{ steps.meta.outputs.version }}')
+            "
+
+  # =============================================================================
+  # Security Scanning
+  # =============================================================================
+  security-scan:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    needs: merge
+
+    steps:
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE_GHCR }}
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY_IMAGE_GHCR }}:${{ steps.meta.outputs.version }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
