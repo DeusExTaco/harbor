@@ -1,4 +1,4 @@
-name: Docker Multi-Architecture Build
+name: Harbor CI/CD Pipeline
 
 on:
   push:
