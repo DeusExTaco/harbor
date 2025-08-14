@@ -1,4 +1,6 @@
-# 🏠 **Zero-config Docker container updates for home labs**
+# Harbor Container Updater
+
+## 🏠 **Zero-config Docker container updates for home labs**
 
 > **Status**: 🚧 Under Development - M0 Foundation Phase
 

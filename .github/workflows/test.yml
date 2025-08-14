@@ -9,7 +9,6 @@ on:
 env:
   # Disable pip progress bars and warnings in CI
   PIP_DISABLE_PIP_VERSION_CHECK: 1
-  PIP_NO_CACHE_DIR: 1
   PIP_PROGRESS_BAR: off
 
 jobs:
