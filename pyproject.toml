@@ -247,8 +247,12 @@ module = [
     "apscheduler.*",
     "structlog.*",
     "prometheus_client.*",
+    "tests.*",
 ]
 ignore_missing_imports = true
+disallow_untyped_decorators = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
 
 # =============================================================================
 # Code Formatting Configuration (Black)

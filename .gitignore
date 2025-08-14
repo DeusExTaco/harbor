@@ -53,6 +53,9 @@ harbor.db*
 htmlcov/
 .pytest_cache/
 .tox/
+coverage.xml
+test.db*
+integration_test.db*
 
 # Docker
 .dockerignore
