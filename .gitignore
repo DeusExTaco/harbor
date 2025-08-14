@@ -16,10 +16,18 @@ parts/
 sdist/
 var/
 wheels/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
+
+# PyCharm
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/usage.statistics.xml
+.idea/dictionaries
+.idea/shelf/
 
 # Virtual environments
 .venv/
@@ -44,13 +52,10 @@ harbor.db*
 .coverage
 htmlcov/
 .pytest_cache/
+.tox/
 
-# PyCharm
-.idea/workspace.xml
-.idea/tasks.xml
-.idea/usage.statistics.xml
-.idea/dictionaries
-.idea/shelf/
+# Docker
+.dockerignore
 
 # OS
 .DS_Store
@@ -58,4 +63,11 @@ Thumbs.db
 
 # Temporary files
 *.tmp
+*.temp
 *.log
+
+# Security and analysis reports
+.bandit-report.json
+bandit-report.json
+safety-report.json
+*.security-report

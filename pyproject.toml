@@ -1,0 +1,296 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "harbor"
+version = "0.1.0"
+description = "Automated Docker container updates for home labs and enterprises"
+readme = "README.md"
+authors = [{name = "Harbor Contributors", email = "harbor@example.com"}]
+license = {text = "MIT"}
+requires-python = ">=3.11"
+keywords = ["docker", "containers", "updates", "automation", "homelab"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities",
+]
+
+# Core runtime dependencies for Harbor v1.0
+dependencies = [
+    # Web framework and async support
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "python-multipart>=0.0.6",  # Form data support
+
+    # Database and ORM
+    "sqlalchemy>=2.0.0",
+    "alembic>=1.12.0",          # Database migrations
+    "aiosqlite>=0.19.0",        # Async SQLite driver
+
+    # Configuration and validation
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+
+    # Template engine and static files
+    "jinja2>=3.1.0",
+
+    # HTTP client for registry API calls
+    "httpx>=0.25.0",
+
+    # Docker integration
+    "docker>=6.1.0",
+
+    # Job scheduling
+    "apscheduler>=3.10.0",
+
+    # Logging and monitoring
+    "structlog>=23.2.0",
+    "prometheus-client>=0.19.0",
+
+    # Security
+    "argon2-cffi>=23.1.0",      # Password hashing
+    "cryptography>=41.0.0",     # Credential encryption
+
+    # Utilities
+    "python-dateutil>=2.8.0",
+    "packaging>=23.0",          # Version parsing
+]
+
+[project.optional-dependencies]
+# Development dependencies
+dev = [
+    # Testing framework
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "pytest-xdist>=3.5.0",     # Parallel test execution
+
+    # End-to-end testing
+    "playwright>=1.40.0",
+
+    # Code quality tools
+    "ruff>=0.12.8",             # Linting and formatting
+    "mypy>=1.17.1",             # Type checking
+    "black>=25.1.0",          # Code formatting
+    "pre-commit-hooks>=6.0.0",       # Git hooks
+
+    # Development utilities
+    "ipython>=8.17.0",         # Better REPL
+    "rich>=13.7.0",            # Pretty printing
+]
+
+# Production dependencies (enterprise features)
+prod = [
+    "psycopg2-binary>=2.9.0",  # PostgreSQL driver
+    "redis>=5.0.0",            # Caching and sessions
+    "gunicorn>=21.2.0",        # Production WSGI server
+]
+
+# Testing dependencies (separate for CI optimization)
+test = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "httpx>=0.25.0",           # Test client
+]
+
+[project.urls]
+Homepage = "https://github.com/DeusExTaco/harbor"
+Documentation = "https://harbor-docs.dev"
+Repository = "https://github.com/DeusExTaco/harbor"
+"Bug Tracker" = "https://github.com/DeusExTaco/harbor/issues"
+
+[project.scripts]
+harbor = "app.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+exclude = ["tests*"]
+
+# =============================================================================
+# Testing Configuration (pytest)
+# =============================================================================
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--cov=app",
+    "--cov-report=html:htmlcov",
+    "--cov-report=term-missing",
+    "--cov-report=xml",
+    "--strict-markers",
+    "--disable-warnings",
+    "-v",
+]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "e2e: End-to-end tests",
+    "performance: Performance tests",
+    "security: Security tests",
+    "slow: Slow running tests",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+# =============================================================================
+# Code Quality Configuration
+# =============================================================================
+
+[tool.ruff]
+# Target Python 3.11+ for Harbor
+target-version = "py313"
+line-length = 88
+indent-width = 4
+
+# Enable specific rule sets
+lint.select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # Pyflakes
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "I",    # isort
+    "N",    # pep8-naming
+    "C4",   # flake8-comprehensions
+    "PTH",  # flake8-use-pathlib
+    "RUF",  # Ruff-specific rules
+]
+
+# Ignore specific rules that conflict with Black or are not needed
+lint.ignore = [
+    "E501",   # Line too long (handled by Black)
+    "B008",   # Do not perform function calls in argument defaults
+    "N806",   # Variable in function should be lowercase (SQLAlchemy models)
+]
+
+# Exclude specific directories
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+    "migrations",  # Alembic migration files
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Test files can use assert statements and have longer lines
+"tests/*" = ["B011", "E501"]
+# Migration files can have any style
+"app/db/migrations/*" = ["E", "W", "F", "UP", "B", "SIM", "I", "N", "C4", "PTH", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "tests"]
+force-single-line = false
+lines-after-imports = 2
+
+# =============================================================================
+# Type Checking Configuration (mypy)
+# =============================================================================
+
+[tool.mypy]
+python_version = "3.13"
+warn_return_any = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+show_error_codes = true
+
+# SQLAlchemy plugin for better type checking
+plugins = ["sqlalchemy.ext.mypy.plugin"]
+
+# Ignore missing imports for external libraries
+[[tool.mypy.overrides]]
+module = [
+    "docker.*",
+    "apscheduler.*",
+    "structlog.*",
+    "prometheus_client.*",
+]
+ignore_missing_imports = true
+
+# =============================================================================
+# Code Formatting Configuration (Black)
+# =============================================================================
+
+[tool.black]
+line-length = 88
+target-version = ['py311', 'py312', 'py313']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # Exclude migration files from formatting
+  migrations
+)/
+'''
+
+# =============================================================================
+# Coverage Configuration
+# =============================================================================
+
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "*/tests/*",
+    "*/migrations/*",
+    "*/venv/*",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"

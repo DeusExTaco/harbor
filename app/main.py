@@ -6,7 +6,7 @@ Currently, a placeholder for the foundation phase.
 """
 
 
-def main():
+def main() -> None:
     """Main application entry point - placeholder for M0 development."""
     print("Harbor Container Updater - Foundation Phase")
     print("M0 Milestone: Project Infrastructure Setup")
