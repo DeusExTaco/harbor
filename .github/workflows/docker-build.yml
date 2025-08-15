@@ -1,4 +1,4 @@
-name: Harbor CI/CD Pipeline
+name: Docker Multi-Architecture Build
 
 on:
   push:
@@ -9,6 +9,13 @@ on:
   schedule:
     # Rebuild weekly to get security updates
     - cron: '0 0 * * 0'
+
+# Explicit permissions instead of write-all
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+  actions: read
 
 env:
   REGISTRY_IMAGE_GHCR: ghcr.io/deusextaco/harbor
