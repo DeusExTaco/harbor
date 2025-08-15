@@ -11,12 +11,12 @@ ARG BUILDPLATFORM=linux/amd64
 # =============================================================================
 FROM python:${PYTHON_VERSION}-slim AS base
 
-# Install system dependencies and security updates
+# Install system dependencies and security updates with exact pinned versions
 RUN apt-get update && apt-get install -y \
     --no-install-recommends \
-    curl \
-    ca-certificates \
-    tzdata \
+    curl=8.14.1-2 \
+    ca-certificates=20250419 \
+    tzdata=2024b-3 \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -35,11 +35,11 @@ ENV PYTHONUNBUFFERED=1 \
 # =============================================================================
 FROM base AS builder
 
-# Install build dependencies
+# Install build dependencies with exact pinned versions
 RUN apt-get update && apt-get install -y \
     --no-install-recommends \
-    build-essential \
-    git \
+    build-essential=12.12-1 \
+    git=1:2.47.2-0.2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -49,10 +49,30 @@ WORKDIR /app
 COPY requirements/base.txt requirements/production.txt ./requirements/
 COPY pyproject.toml ./
 
-# Install Python dependencies to user directory
-RUN pip install --user --no-warn-script-location \
-    -r requirements/base.txt \
-    -r requirements/production.txt
+# Debug: Show platform information
+RUN echo "=== Build Information ===" && \
+    echo "TARGETPLATFORM: ${TARGETPLATFORM}" && \
+    echo "BUILDPLATFORM: ${BUILDPLATFORM}" && \
+    uname -a && \
+    python --version && \
+    pip --version
+
+# Install Python dependencies with proper error handling
+RUN set -e && \
+    pip install --upgrade pip==24.3.1 && \
+    echo "Installing dependencies for platform: ${TARGETPLATFORM}" && \
+    if pip install --user --no-warn-script-location \
+        -r requirements/base.txt \
+        -r requirements/production.txt; then \
+        echo "Standard installation succeeded"; \
+    else \
+        echo "Standard installation failed, trying ARM-compatible fallback..."; \
+        pip install --user --no-warn-script-location \
+            --prefer-binary \
+            --no-build-isolation \
+            -r requirements/base.txt \
+            -r requirements/production.txt; \
+    fi
 
 # =============================================================================
 # Production runtime stage
@@ -121,9 +141,21 @@ CMD ["python", "-m", "uvicorn", "app.main:create_app", "--factory", "--host", "0
 # =============================================================================
 FROM builder AS development
 
-# Install development dependencies
+# Install development dependencies with proper error handling
 COPY requirements/development.txt ./requirements/
-RUN pip install --user --no-warn-script-location -r requirements/development.txt
+RUN set -e && \
+    pip install --upgrade pip==24.3.1 && \
+    echo "Installing development dependencies for platform: ${TARGETPLATFORM}" && \
+    if pip install --user --no-warn-script-location \
+        -r requirements/development.txt; then \
+        echo "Standard dev installation succeeded"; \
+    else \
+        echo "Standard dev installation failed, trying ARM-compatible fallback..."; \
+        pip install --user --no-warn-script-location \
+            --prefer-binary \
+            --no-build-isolation \
+            -r requirements/development.txt; \
+    fi
 
 # Copy application code with development setup
 WORKDIR /app
@@ -133,11 +165,11 @@ COPY --chown=harbor:harbor . .
 RUN mkdir -p /app/data /app/logs /app/config && \
     chown -R harbor:harbor /app
 
-# Install development tools
+# Install development tools with exact pinned versions
 RUN apt-get update && apt-get install -y \
     --no-install-recommends \
-    vim \
-    htop \
+    vim=2:9.1.0861-1 \
+    htop=3.4.0-1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Switch to non-root user
