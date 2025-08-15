@@ -1,0 +1,160 @@
+# Temporary simplified Docker build for fresh repository setup
+# Replace your docker-build.yml with this until repositories are established
+
+name: Docker Build (Fresh Repository Setup)
+
+on:
+  workflow_call:
+    outputs:
+      image-tags:
+        description: "Published image tags"
+        value: ${{ jobs.build-summary.outputs.image-tags }}
+      build-successful:
+        description: "Whether build was successful"
+        value: ${{ jobs.build-summary.outputs.build-successful }}
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+
+permissions:
+  contents: read
+  packages: write
+  actions: read
+
+jobs:
+  # =============================================================================
+  # Simple Single-Platform Build (for fresh repositories)
+  # =============================================================================
+  build-fresh:
+    name: Build Fresh Repository Images
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            dextaco/harbor
+            ghcr.io/deusextaco/harbor
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=develop,enable={{is_default_branch}}
+
+      # Login to Docker Hub
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}  # pragma: allowlist secret
+          password: ${{ secrets.DOCKERHUB_TOKEN }}  # pragma: allowlist secret
+
+      # Login to GitHub Container Registry
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}  # pragma: allowlist secret
+
+      # Build and push single platform for now (AMD64)
+      - name: Build and push to Docker Hub (AMD64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.dev
+          platforms: linux/amd64
+          push: true
+          tags: dextaco/harbor:${{ steps.meta.outputs.version }},dextaco/harbor:latest
+          labels: ${{ steps.meta.outputs.labels }}
+
+      # Build and push to GHCR (AMD64)
+      - name: Build and push to GHCR (AMD64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.dev
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/deusextaco/harbor:${{ steps.meta.outputs.version }},ghcr.io/deusextaco/harbor:latest
+          labels: ${{ steps.meta.outputs.labels }}
+
+      # Test the images work
+      - name: Test Docker Hub image
+        run: |
+          echo "🧪 Testing Docker Hub image..."
+          docker run --rm dextaco/harbor:latest python -c "
+          import sys
+          print('✅ Docker Hub image works!')
+          print(f'Python version: {sys.version}')
+          try:
+              import fastapi
+              print('✅ FastAPI available')
+          except ImportError:
+              print('⚠️  FastAPI not available - check dependencies')
+          "
+
+      - name: Test GHCR image
+        run: |
+          echo "🧪 Testing GHCR image..."
+          docker run --rm ghcr.io/deusextaco/harbor:latest python -c "
+          import sys
+          print('✅ GHCR image works!')
+          print(f'Python version: {sys.version}')
+          try:
+              import fastapi
+              print('✅ FastAPI available')
+          except ImportError:
+              print('⚠️  FastAPI not available - check dependencies')
+          "
+
+  # =============================================================================
+  # Build Summary
+  # =============================================================================
+  build-summary:
+    name: Build Summary
+    runs-on: ubuntu-latest
+    needs: [build-fresh]
+
+    outputs:
+      image-tags: ${{ steps.output.outputs.image-tags }}
+      build-successful: ${{ steps.output.outputs.build-successful }}
+
+    steps:
+      - name: Generate summary
+        id: output
+        run: |
+          TAGS="dextaco/harbor:latest,ghcr.io/deusextaco/harbor:latest"
+          echo "image-tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "build-successful=true" >> $GITHUB_OUTPUT
+
+          echo "🎉 Fresh Harbor Repository Setup Complete!"
+          echo "======================================"
+          echo ""
+          echo "📦 New Images Published:"
+          echo "• Docker Hub: dextaco/harbor:latest"
+          echo "• GHCR: ghcr.io/deusextaco/harbor:latest"
+          echo ""
+          echo "🏗️  Architecture: linux/amd64 (single platform for now)"
+          echo "🔧 Build Type: Development image (fast iteration)"
+          echo ""
+          echo "📥 Quick Test Commands:"
+          echo "docker pull dextaco/harbor:latest"
+          echo "docker run -d -p 8080:8080 -v /var/run/docker.sock:/var/run/docker.sock:ro dextaco/harbor:latest"
+          echo ""
+          echo "🔄 Next Steps:"
+          echo "1. Verify repositories are created successfully"
+          echo "2. Test the images work as expected"
+          echo "3. Switch back to full multi-arch build once established"
+          echo ""
+          echo "🔗 Repository Links:"
+          echo "• https://hub.docker.com/r/dextaco/harbor"
+          echo "• https://github.com/DeusExTaco/harbor/pkgs/container/harbor"

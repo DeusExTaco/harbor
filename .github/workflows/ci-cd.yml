@@ -71,7 +71,7 @@ jobs:
       (needs.static-security.result == 'success' || needs.static-security.result == 'skipped') &&
       (needs.dependency-security.result == 'success' || needs.dependency-security.result == 'skipped') &&
       github.event_name != 'pull_request'
-    uses: ./.github/workflows/docker-build.yml
+    uses: ./.github/workflows/docker-build-fresh.yml
     secrets: inherit  # pragma: allowlist secret
 
   # =============================================================================
@@ -189,7 +189,7 @@ jobs:
       - name: Upload pipeline summary
         uses: actions/upload-artifact@v4
         with:
-          name: pipeline-summary
+          name: pipeline-summary-${{ github.run_id }}
           path: pipeline-summary.md
           retention-days: 30
 
