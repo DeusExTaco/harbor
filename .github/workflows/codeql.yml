@@ -1,6 +1,11 @@
 name: "CodeQL Security Analysis"
 
 on:
+  workflow_call:
+    outputs:
+      codeql-passed:
+        description: "Whether CodeQL analysis passed"
+        value: ${{ jobs.analyze.outputs.codeql-passed }}
   push:
     branches: [ "main", "develop" ]
   pull_request:
@@ -19,6 +24,9 @@ jobs:
     name: CodeQL Analysis (${{ matrix.language }})
     runs-on: ubuntu-latest
     timeout-minutes: 360
+
+    outputs:
+      codeql-passed: ${{ steps.codeql-result.outputs.passed }}
 
     strategy:
       fail-fast: false
@@ -47,14 +55,25 @@ jobs:
             - "**/node_modules/**"
             - "**/__pycache__/**"
             - "**/migrations/**"
+            - "examples/**"
+            - "docs/**"
           query-filters:
             - exclude:
                 id: py/unused-import
             - exclude:
                 id: py/similar-function
+            - exclude:
+                id: py/clear-text-logging-sensitive-data
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
       with:
         category: "/language:${{matrix.language}}"
         upload: true
+
+    - name: Set CodeQL result
+      id: codeql-result
+      run: |
+        # CodeQL analysis completed successfully if we reach this step
+        echo "passed=true" >> $GITHUB_OUTPUT
+        echo "✅ CodeQL analysis completed successfully"

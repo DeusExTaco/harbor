@@ -1,0 +1,296 @@
+name: Harbor CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+  pull_request:
+    branches: [main, develop]
+
+# Comprehensive permissions for all workflow operations
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+  pull-requests: write
+  issues: write
+  packages: write
+
+env:
+  # Global environment variables
+  HARBOR_VERSION: "0.1.0"
+  HARBOR_MILESTONE: "M0"
+
+jobs:
+  # =============================================================================
+  # Stage 1: Parallel Static Analysis & Fast Checks
+  # =============================================================================
+
+  # Fast code quality checks (runs immediately)
+  code-quality:
+    name: Code Quality & Linting
+    uses: ./.github/workflows/test.yml
+    secrets: inherit  # pragma: allowlist secret
+    with:
+      stage: "quality"
+
+  # Static security analysis (runs in parallel with quality)
+  static-security:
+    name: Static Security Analysis
+    uses: ./.github/workflows/codeql.yml
+    secrets: inherit  # pragma: allowlist secret
+
+  # Dependency scanning (runs in parallel)
+  dependency-security:
+    name: Dependency Security
+    uses: ./.github/workflows/dependency-review.yml
+    secrets: inherit  # pragma: allowlist secret
+
+  # =============================================================================
+  # Stage 2: Comprehensive Test Suite (After Quality Gate)
+  # =============================================================================
+
+  test-suite:
+    name: Full Test Suite
+    needs: [code-quality]  # Wait for linting to pass
+    uses: ./.github/workflows/test.yml
+    secrets: inherit  # pragma: allowlist secret
+    with:
+      stage: "full-tests"
+
+  # =============================================================================
+  # Stage 3: Build & Publish (After All Tests Pass)
+  # =============================================================================
+
+  docker-build:
+    name: Docker Build & Publish
+    needs: [test-suite, static-security, dependency-security]  # All checks must pass
+    if: |
+      always() &&
+      needs.test-suite.outputs.tests-passed == 'true' &&
+      (needs.static-security.result == 'success' || needs.static-security.result == 'skipped') &&
+      (needs.dependency-security.result == 'success' || needs.dependency-security.result == 'skipped') &&
+      github.event_name != 'pull_request'  # Only build on push/tags
+    uses: ./.github/workflows/docker-build.yml
+    secrets: inherit  # pragma: allowlist secret
+
+  # =============================================================================
+  # Stage 4: Security Scanning (After Images Are Built)
+  # =============================================================================
+
+  container-security:
+    name: Container Security Scan
+    needs: [docker-build]  # Wait for images to be published
+    if: |
+      always() &&
+      needs.docker-build.outputs.build-successful == 'true' &&
+      github.event_name != 'pull_request'
+    uses: ./.github/workflows/security.yml
+    secrets: inherit  # pragma: allowlist secret
+    with:
+      scan-type: "container"
+      image-tags: ${{ needs.docker-build.outputs.image-tags }}
+
+  # =============================================================================
+  # Stage 5: Final Status & Summary
+  # =============================================================================
+
+  pipeline-summary:
+    name: Pipeline Summary
+    runs-on: ubuntu-latest
+    needs: [code-quality, static-security, dependency-security, test-suite, docker-build, container-security]
+    if: always()
+
+    steps:
+      - name: Generate pipeline summary
+        run: |
+          echo "# 🚀 Harbor CI/CD Pipeline Summary" > pipeline-summary.md
+          echo "Generated on: $(date -u)" >> pipeline-summary.md
+          echo "Pipeline ID: ${{ github.run_id }}" >> pipeline-summary.md
+          echo "Commit: ${{ github.sha }}" >> pipeline-summary.md
+          echo "" >> pipeline-summary.md
+
+          echo "## 📊 Pipeline Results" >> pipeline-summary.md
+          echo "| Stage | Status | Duration |" >> pipeline-summary.md
+          echo "|-------|--------|----------|" >> pipeline-summary.md
+          echo "| 🔍 Code Quality | ${{ needs.code-quality.result }} | - |" >> pipeline-summary.md
+          echo "| 🔒 Static Security | ${{ needs.static-security.result }} | - |" >> pipeline-summary.md
+          echo "| 📦 Dependency Security | ${{ needs.dependency-security.result }} | - |" >> pipeline-summary.md
+          echo "| 🧪 Test Suite | ${{ needs.test-suite.result }} | - |" >> pipeline-summary.md
+          echo "| 🐳 Docker Build | ${{ needs.docker-build.result }} | - |" >> pipeline-summary.md
+          echo "| 🛡️ Container Security | ${{ needs.container-security.result }} | - |" >> pipeline-summary.md
+          echo "" >> pipeline-summary.md
+
+          # Determine overall pipeline status
+          if [[ "${{ needs.code-quality.result }}" == "success" && \
+                "${{ needs.test-suite.result }}" == "success" ]]; then
+            echo "## ✅ Pipeline Status: SUCCESS" >> pipeline-summary.md
+            echo "" >> pipeline-summary.md
+            echo "### 🎉 All critical checks passed!" >> pipeline-summary.md
+
+            if [ "${{ github.event_name }}" != "pull_request" ]; then
+              if [[ "${{ needs.docker-build.result }}" == "success" ]]; then
+                echo "- ✅ Docker images built and published" >> pipeline-summary.md
+                echo "- ✅ Multi-architecture support (amd64, arm64)" >> pipeline-summary.md
+                echo "- ✅ Available on Docker Hub and GHCR" >> pipeline-summary.md
+
+                if [[ "${{ needs.container-security.result }}" == "success" ]]; then
+                  echo "- ✅ Container security scans completed" >> pipeline-summary.md
+                fi
+              fi
+            else
+              echo "- ℹ️  Pull request - Docker build skipped" >> pipeline-summary.md
+            fi
+          else
+            echo "## ❌ Pipeline Status: FAILED" >> pipeline-summary.md
+            echo "" >> pipeline-summary.md
+            echo "### 🚨 Critical issues found!" >> pipeline-summary.md
+
+            if [[ "${{ needs.code-quality.result }}" != "success" ]]; then
+              echo "- ❌ Code quality checks failed" >> pipeline-summary.md
+            fi
+            if [[ "${{ needs.test-suite.result }}" != "success" ]]; then
+              echo "- ❌ Test suite failed" >> pipeline-summary.md
+            fi
+          fi
+
+          echo "" >> pipeline-summary.md
+          echo "## 📋 Next Steps" >> pipeline-summary.md
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "- Review any failed checks above" >> pipeline-summary.md
+            echo "- Fix issues and push new commits" >> pipeline-summary.md
+            echo "- Merge when all checks pass" >> pipeline-summary.md
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            if [[ "${{ needs.docker-build.result }}" == "success" ]]; then
+              echo "- ✅ New images are available for deployment" >> pipeline-summary.md
+              echo "- 🔍 Review security scan results if needed" >> pipeline-summary.md
+              echo "- 📦 Update any deployment configs with new image tags" >> pipeline-summary.md
+            else
+              echo "- ❌ Fix build issues before deployment" >> pipeline-summary.md
+            fi
+          fi
+
+          echo "" >> pipeline-summary.md
+          echo "## 🏗️ Harbor Development Status" >> pipeline-summary.md
+          echo "- **Version**: ${{ env.HARBOR_VERSION }}" >> pipeline-summary.md
+          echo "- **Milestone**: ${{ env.HARBOR_MILESTONE }} (Foundation Phase)" >> pipeline-summary.md
+          echo "- **Current Focus**: Building core infrastructure and CI/CD pipeline" >> pipeline-summary.md
+          echo "- **Next Milestone**: M1 (Container Discovery & Registry Integration)" >> pipeline-summary.md
+          echo "" >> pipeline-summary.md
+          echo "## 🔗 Useful Links" >> pipeline-summary.md
+          echo "- [Repository](https://github.com/DeusExTaco/harbor)" >> pipeline-summary.md
+          echo "- [Docker Hub](https://hub.docker.com/r/dextaco/harbor)" >> pipeline-summary.md
+          echo "- [GitHub Packages](https://github.com/DeusExTaco/harbor/pkgs/container/harbor)" >> pipeline-summary.md
+          echo "- [Issues](https://github.com/DeusExTaco/harbor/issues)" >> pipeline-summary.md
+
+          cat pipeline-summary.md
+
+      - name: Upload pipeline summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-summary
+          path: pipeline-summary.md
+          retention-days: 30
+
+      - name: Set final pipeline status
+        run: |
+          if [[ "${{ needs.code-quality.result }}" == "success" && \
+                "${{ needs.test-suite.result }}" == "success" ]]; then
+            echo "✅ Harbor CI/CD Pipeline completed successfully!"
+            echo ""
+            echo "📊 Summary:"
+            echo "- Code Quality: ✅ PASSED"
+            echo "- Test Suite: ✅ PASSED"
+            echo "- Static Security: ${{ needs.static-security.result }}"
+            echo "- Docker Build: ${{ needs.docker-build.result }}"
+            echo "- Container Security: ${{ needs.container-security.result }}"
+            echo ""
+            if [ "${{ needs.docker-build.result }}" == "success" ]; then
+              echo "🐳 New Docker images published:"
+              echo "- dextaco/harbor:latest"
+              echo "- ghcr.io/deusextaco/harbor:latest"
+            fi
+          else
+            echo "❌ Harbor CI/CD Pipeline failed!"
+            echo ""
+            echo "🚨 Failed stages:"
+            if [[ "${{ needs.code-quality.result }}" != "success" ]]; then
+              echo "- Code Quality: ${{ needs.code-quality.result }}"
+            fi
+            if [[ "${{ needs.test-suite.result }}" != "success" ]]; then
+              echo "- Test Suite: ${{ needs.test-suite.result }}"
+            fi
+            echo ""
+            echo "Please review the failed stages and fix the issues."
+            exit 1
+          fi
+
+  # =============================================================================
+  # PR Specific Actions (Only for Pull Requests)
+  # =============================================================================
+
+  pr-feedback:
+    name: PR Feedback
+    runs-on: ubuntu-latest
+    needs: [code-quality, static-security, test-suite]
+    if: |
+      always() &&
+      github.event_name == 'pull_request'
+
+    steps:
+      - name: Generate PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const codeQuality = '${{ needs.code-quality.result }}';
+            const staticSecurity = '${{ needs.static-security.result }}';
+            const testSuite = '${{ needs.test-suite.result }}';
+
+            let comment = '## 🤖 Harbor CI/CD Results\n\n';
+            comment += '| Check | Status |\n';
+            comment += '|-------|--------|\n';
+            comment += `| 🔍 Code Quality | ${codeQuality === 'success' ? '✅ Passed' : '❌ Failed'} |\n`;
+            comment += `| 🔒 Static Security | ${staticSecurity === 'success' ? '✅ Passed' : staticSecurity === 'skipped' ? '⏭️ Skipped' : '❌ Failed'} |\n`;
+            comment += `| 🧪 Test Suite | ${testSuite === 'success' ? '✅ Passed' : '❌ Failed'} |\n\n`;
+
+            if (codeQuality === 'success' && testSuite === 'success') {
+              comment += '✅ **All critical checks passed!** This PR is ready for review.\n\n';
+              comment += '> 📦 Docker images will be built and published when merged to main.\n';
+            } else {
+              comment += '❌ **Some checks failed.** Please review and fix the issues above.\n\n';
+              comment += '> 🔧 Push new commits to re-run the checks automatically.\n';
+            }
+
+            comment += '\n---\n';
+            comment += `<sub>🤖 Automated comment from Harbor CI/CD Pipeline | Run ID: ${{ github.run_id }}</sub>`;
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('Harbor CI/CD Results')
+            );
+
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }
