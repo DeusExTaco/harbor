@@ -1,4 +1,5 @@
 name: Cleanup Unknown Packages
+# manual run only
 
 on:
   workflow_dispatch:  # Manual trigger only
