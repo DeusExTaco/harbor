@@ -245,7 +245,7 @@ jobs:
           fi
           echo "Documentation check completed"
 
-# =============================================================================
+  # =============================================================================
   # Test Summary (Aggregates all results)
   # =============================================================================
   test-summary:
@@ -261,39 +261,47 @@ jobs:
       - name: Generate test summary
         id: summary
         run: |
-          echo "# 🧪 Harbor Test Summary" > test-summary.md
-          echo "Generated on: $(date -u)" >> test-summary.md
-          echo "" >> test-summary.md
-          echo "## 📊 Test Results" >> test-summary.md
-          echo "- 🔍 Code Quality: ${{ needs.quality.result }}" >> test-summary.md
-          echo "- 🧪 Test Suite: ${{ needs.test.result }}" >> test-summary.md
-          echo "- 🐳 Docker Build: ${{ needs.docker.result }}" >> test-summary.md
-          echo "- 📚 Documentation: ${{ needs.docs.result }}" >> test-summary.md
-          echo "" >> test-summary.md
+          # Create unique artifact name based on the calling stage
+          STAGE="${{ inputs.stage || 'direct' }}"
+          TIMESTAMP=$(date +%s)
+          UNIQUE_ID="${STAGE}-${TIMESTAMP}-${{ github.run_number }}"
+
+          echo "# 🧪 Harbor Test Summary (${STAGE})" > test-summary-${UNIQUE_ID}.md
+          echo "Generated on: $(date -u)" >> test-summary-${UNIQUE_ID}.md
+          echo "" >> test-summary-${UNIQUE_ID}.md
+          echo "## 📊 Test Results" >> test-summary-${UNIQUE_ID}.md
+          echo "- 🔍 Code Quality: ${{ needs.quality.result }}" >> test-summary-${UNIQUE_ID}.md
+          echo "- 🧪 Test Suite: ${{ needs.test.result }}" >> test-summary-${UNIQUE_ID}.md
+          echo "- 🐳 Docker Build: ${{ needs.docker.result }}" >> test-summary-${UNIQUE_ID}.md
+          echo "- 📚 Documentation: ${{ needs.docs.result }}" >> test-summary-${UNIQUE_ID}.md
+          echo "" >> test-summary-${UNIQUE_ID}.md
 
           # Determine overall result
           if [[ "${{ needs.quality.result }}" == "success" && \
                 "${{ needs.test.result }}" == "success" && \
                 "${{ needs.docker.result }}" == "success" ]]; then
             echo "tests-passed=true" >> $GITHUB_OUTPUT
-            echo "## ✅ Overall Result: PASSED" >> test-summary.md
-            echo "" >> test-summary.md
-            echo "All tests passed! Ready for Docker build pipeline." >> test-summary.md
+            echo "## ✅ Overall Result: PASSED" >> test-summary-${UNIQUE_ID}.md
+            echo "" >> test-summary-${UNIQUE_ID}.md
+            echo "All tests passed! Ready for Docker build pipeline." >> test-summary-${UNIQUE_ID}.md
           else
             echo "tests-passed=false" >> $GITHUB_OUTPUT
-            echo "## ❌ Overall Result: FAILED" >> test-summary.md
-            echo "" >> test-summary.md
-            echo "Some tests failed. Docker build pipeline will be skipped." >> test-summary.md
+            echo "## ❌ Overall Result: FAILED" >> test-summary-${UNIQUE_ID}.md
+            echo "" >> test-summary-${UNIQUE_ID}.md
+            echo "Some tests failed. Docker build pipeline will be skipped." >> test-summary-${UNIQUE_ID}.md
           fi
 
-          cat test-summary.md
+          # Store the filename for upload
+          echo "SUMMARY_FILE=test-summary-${UNIQUE_ID}.md" >> $GITHUB_ENV
+
+          cat test-summary-${UNIQUE_ID}.md
 
       - name: Upload test summary
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-summary-${{ github.run_number }}-${{ strategy.job-index || '0' }}
-          path: test-summary.md
+          name: ${{ env.SUMMARY_FILE }}
+          path: ${{ env.SUMMARY_FILE }}
           retention-days: 30
 
   # =============================================================================
