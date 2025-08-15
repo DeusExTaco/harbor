@@ -1,6 +1,3 @@
-# Temporary simplified Docker build for fresh repository setup
-# Replace your docker-build.yml with this until repositories are established
-
 name: Docker Build (Fresh Repository Setup)
 
 on:
@@ -22,9 +19,6 @@ permissions:
   actions: read
 
 jobs:
-  # =============================================================================
-  # Simple Single-Platform Build (for fresh repositories)
-  # =============================================================================
   build-fresh:
     name: Build Fresh Repository Images
     runs-on: ubuntu-latest
@@ -48,14 +42,13 @@ jobs:
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=develop,enable={{is_default_branch}}
 
       # Login to Docker Hub
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}  # pragma: allowlist secret
-          password: ${{ secrets.DOCKERHUB_TOKEN }}  # pragma: allowlist secret
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # Login to GitHub Container Registry
       - name: Log in to GitHub Container Registry
@@ -63,31 +56,33 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}  # pragma: allowlist secret
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build and push single platform for now (AMD64)
-      - name: Build and push to Docker Hub (AMD64)
+      # Build and push to Docker Hub
+      - name: Build and push to Docker Hub
         uses: docker/build-push-action@v5
         with:
           context: .
           file: deploy/docker/Dockerfile.dev
           platforms: linux/amd64
           push: true
-          tags: dextaco/harbor:${{ steps.meta.outputs.version }},dextaco/harbor:latest
+          tags: |
+            dextaco/harbor:latest
+            dextaco/harbor:${{ github.sha }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=dextaco/harbor,push=true
 
-      # Build and push to GHCR (AMD64)
-      - name: Build and push to GHCR (AMD64)
+      # Build and push to GHCR
+      - name: Build and push to GHCR
         uses: docker/build-push-action@v5
         with:
           context: .
           file: deploy/docker/Dockerfile.dev
           platforms: linux/amd64
           push: true
-          tags: ghcr.io/deusextaco/harbor:${{ steps.meta.outputs.version }},ghcr.io/deusextaco/harbor:latest
+          tags: |
+            ghcr.io/deusextaco/harbor:latest
+            ghcr.io/deusextaco/harbor:${{ github.sha }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=ghcr.io/deusextaco/harbor,push=true
 
       # Test the images work
       - name: Test Docker Hub image
@@ -101,7 +96,14 @@ jobs:
               import fastapi
               print('✅ FastAPI available')
           except ImportError:
-              print('⚠️  FastAPI not available - check dependencies')
+              print('⚠️  FastAPI not available')
+          try:
+              import app
+              print('✅ Harbor app module available')
+              print(f'Harbor version: {app.__version__}')
+              print(f'Milestone: {app.__milestone__}')
+          except ImportError as e:
+              print(f'❌ Harbor app import failed: {e}')
           "
 
       - name: Test GHCR image
@@ -115,12 +117,40 @@ jobs:
               import fastapi
               print('✅ FastAPI available')
           except ImportError:
-              print('⚠️  FastAPI not available - check dependencies')
+              print('⚠️  FastAPI not available')
+          try:
+              import app
+              print('✅ Harbor app module available')
+              print(f'Harbor version: {app.__version__}')
+              print(f'Milestone: {app.__milestone__}')
+          except ImportError as e:
+              print(f'❌ Harbor app import failed: {e}')
           "
 
-  # =============================================================================
-  # Build Summary
-  # =============================================================================
+      # Test FastAPI application
+      - name: Test FastAPI endpoints
+        run: |
+          echo "🧪 Testing FastAPI application..."
+          # Start container in background
+          docker run -d --name harbor-test -p 8080:8080 dextaco/harbor:latest
+
+          # Wait for startup
+          sleep 10
+
+          # Test endpoints
+          echo "Testing /healthz endpoint..."
+          curl -f http://localhost:8080/healthz || echo "Health endpoint failed"
+
+          echo "Testing / endpoint..."
+          curl -f http://localhost:8080/ || echo "Root endpoint failed"
+
+          echo "Testing /version endpoint..."
+          curl -f http://localhost:8080/version || echo "Version endpoint failed"
+
+          # Cleanup
+          docker stop harbor-test
+          docker rm harbor-test
+
   build-summary:
     name: Build Summary
     runs-on: ubuntu-latest
@@ -138,24 +168,27 @@ jobs:
           echo "image-tags=${TAGS}" >> $GITHUB_OUTPUT
           echo "build-successful=true" >> $GITHUB_OUTPUT
 
-          echo "🎉 Fresh Harbor Repository Setup Complete!"
-          echo "======================================"
+          echo "🎉 Harbor M0 Foundation Build Complete!"
+          echo "====================================="
           echo ""
-          echo "📦 New Images Published:"
+          echo "📦 Published Images:"
           echo "• Docker Hub: dextaco/harbor:latest"
           echo "• GHCR: ghcr.io/deusextaco/harbor:latest"
           echo ""
-          echo "🏗️  Architecture: linux/amd64 (single platform for now)"
-          echo "🔧 Build Type: Development image (fast iteration)"
+          echo "🏗️  Architecture: linux/amd64"
+          echo "🔧 Build Type: Development image with FastAPI"
+          echo "📋 Milestone: M0 (Foundation)"
           echo ""
-          echo "📥 Quick Test Commands:"
-          echo "docker pull dextaco/harbor:latest"
-          echo "docker run -d -p 8080:8080 -v /var/run/docker.sock:/var/run/docker.sock:ro dextaco/harbor:latest"
+          echo "📥 Quick Start:"
+          echo "docker run -d -p 8080:8080 dextaco/harbor:latest"
+          echo "# Then visit http://localhost:8080"
           echo ""
-          echo "🔄 Next Steps:"
-          echo "1. Verify repositories are created successfully"
-          echo "2. Test the images work as expected"
-          echo "3. Switch back to full multi-arch build once established"
+          echo "🔗 Available Endpoints:"
+          echo "• / - Harbor information"
+          echo "• /healthz - Health check"
+          echo "• /readyz - Readiness check"
+          echo "• /version - Version information"
+          echo "• /docs - FastAPI documentation"
           echo ""
           echo "🔗 Repository Links:"
           echo "• https://hub.docker.com/r/dextaco/harbor"
