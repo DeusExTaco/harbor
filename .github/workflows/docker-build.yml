@@ -30,9 +30,9 @@ jobs:
       fail-fast: false
       matrix:
         platform:
-          - linux-amd64
-          - linux-arm64
-          - linux-arm-v7
+          - linux/amd64
+          - linux/arm64
+          - linux/arm/v7
 
     steps:
       - name: Checkout code
@@ -88,7 +88,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            BUILDPLATFORM=linux-amd64
+            BUILDPLATFORM=linux/amd64
             TARGETPLATFORM=${{ matrix.platform }}
 
       - name: Export digest
@@ -164,7 +164,7 @@ jobs:
     needs: merge
     strategy:
       matrix:
-        platform: [linux-amd64, linux-arm64]
+        platform: [linux/amd64, linux/arm64]
 
     steps:
       - name: Set up QEMU
