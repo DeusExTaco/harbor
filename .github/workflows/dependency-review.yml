@@ -17,7 +17,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
-  security-events: write
+  security-events: write  # pragma: allowlist secret
 
 jobs:
   # =============================================================================

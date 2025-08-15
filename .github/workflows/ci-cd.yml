@@ -59,7 +59,7 @@ jobs:
       stage: "full-tests"
 
   # =============================================================================
-  # Stage 3: Build & Publish (After All Tests Pass)
+  # Stage 3: Build & Publish (After Tests Pass)
   # =============================================================================
 
   docker-build:
@@ -233,7 +233,7 @@ jobs:
   pr-feedback:
     name: PR Feedback
     runs-on: ubuntu-latest
-    needs: [code-quality, static-security, test-suite]
+    needs: [code-quality, static-security, dependency-security, test-suite]
     if: |
       always() &&
       github.event_name == 'pull_request'
@@ -245,6 +245,7 @@ jobs:
           script: |
             const codeQuality = '${{ needs.code-quality.result }}';
             const staticSecurity = '${{ needs.static-security.result }}';
+            const dependencySecurity = '${{ needs.dependency-security.result }}';
             const testSuite = '${{ needs.test-suite.result }}';
 
             let comment = '## 🤖 Harbor CI/CD Results\n\n';
@@ -252,6 +253,7 @@ jobs:
             comment += '|-------|--------|\n';
             comment += `| 🔍 Code Quality | ${codeQuality === 'success' ? '✅ Passed' : '❌ Failed'} |\n`;
             comment += `| 🔒 Static Security | ${staticSecurity === 'success' ? '✅ Passed' : staticSecurity === 'skipped' ? '⏭️ Skipped' : '❌ Failed'} |\n`;
+            comment += `| 📦 Dependency Security | ${dependencySecurity === 'success' ? '✅ Passed' : dependencySecurity === 'skipped' ? '⏭️ Skipped' : '❌ Failed'} |\n`;
             comment += `| 🧪 Test Suite | ${testSuite === 'success' ? '✅ Passed' : '❌ Failed'} |\n\n`;
 
             if (codeQuality === 'success' && testSuite === 'success') {
