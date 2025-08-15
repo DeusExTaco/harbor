@@ -31,17 +31,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            dextaco/harbor
-            ghcr.io/deusextaco/harbor
-          tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Determine tags
+        id: tags
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "DOCKER_TAGS=dextaco/harbor:latest" >> $GITHUB_ENV
+            echo "GHCR_TAGS=ghcr.io/deusextaco/harbor:latest" >> $GITHUB_ENV
+          elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
+            echo "DOCKER_TAGS=dextaco/harbor:develop" >> $GITHUB_ENV
+            echo "GHCR_TAGS=ghcr.io/deusextaco/harbor:develop" >> $GITHUB_ENV
+          else
+            echo "DOCKER_TAGS=dextaco/harbor:latest" >> $GITHUB_ENV
+            echo "GHCR_TAGS=ghcr.io/deusextaco/harbor:latest" >> $GITHUB_ENV
+          fi
 
       # Login to Docker Hub
       - name: Log in to Docker Hub
@@ -58,7 +60,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build and push to Docker Hub
+      # Build and push to Docker Hub (AMD64 only, proper tagging)
       - name: Build and push to Docker Hub
         uses: docker/build-push-action@v5
         with:
@@ -66,12 +68,11 @@ jobs:
           file: deploy/docker/Dockerfile.dev
           platforms: linux/amd64
           push: true
-          tags: |
-            dextaco/harbor:latest
-            dextaco/harbor:${{ github.sha }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ env.DOCKER_TAGS }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      # Build and push to GHCR
+      # Build and push to GHCR (AMD64 only, proper tagging)
       - name: Build and push to GHCR
         uses: docker/build-push-action@v5
         with:
@@ -79,16 +80,15 @@ jobs:
           file: deploy/docker/Dockerfile.dev
           platforms: linux/amd64
           push: true
-          tags: |
-            ghcr.io/deusextaco/harbor:latest
-            ghcr.io/deusextaco/harbor:${{ github.sha }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ env.GHCR_TAGS }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       # Test the images work
       - name: Test Docker Hub image
         run: |
           echo "🧪 Testing Docker Hub image..."
-          docker run --rm dextaco/harbor:latest python -c "
+          docker run --rm ${{ env.DOCKER_TAGS }} python -c "
           import sys
           print('✅ Docker Hub image works!')
           print(f'Python version: {sys.version}')
@@ -109,7 +109,7 @@ jobs:
       - name: Test GHCR image
         run: |
           echo "🧪 Testing GHCR image..."
-          docker run --rm ghcr.io/deusextaco/harbor:latest python -c "
+          docker run --rm ${{ env.GHCR_TAGS }} python -c "
           import sys
           print('✅ GHCR image works!')
           print(f'Python version: {sys.version}')
@@ -132,7 +132,7 @@ jobs:
         run: |
           echo "🧪 Testing FastAPI application..."
           # Start container in background
-          docker run -d --name harbor-test -p 8080:8080 dextaco/harbor:latest
+          docker run -d --name harbor-test -p 8080:8080 ${{ env.DOCKER_TAGS }}
 
           # Wait for startup
           sleep 10
@@ -164,32 +164,28 @@ jobs:
       - name: Generate summary
         id: output
         run: |
-          TAGS="dextaco/harbor:latest,ghcr.io/deusextaco/harbor:latest"
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            TAGS="dextaco/harbor:latest,ghcr.io/deusextaco/harbor:latest"
+          elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
+            TAGS="dextaco/harbor:develop,ghcr.io/deusextaco/harbor:develop"
+          else
+            TAGS="dextaco/harbor:latest,ghcr.io/deusextaco/harbor:latest"
+          fi
+
           echo "image-tags=${TAGS}" >> $GITHUB_OUTPUT
           echo "build-successful=true" >> $GITHUB_OUTPUT
 
-          echo "🎉 Harbor M0 Foundation Build Complete!"
-          echo "====================================="
+          echo "🎉 Harbor Fresh Repository Build Complete!"
+          echo "======================================="
           echo ""
           echo "📦 Published Images:"
-          echo "• Docker Hub: dextaco/harbor:latest"
-          echo "• GHCR: ghcr.io/deusextaco/harbor:latest"
+          echo "• Docker Hub: $(echo $TAGS | cut -d',' -f1)"
+          echo "• GHCR: $(echo $TAGS | cut -d',' -f2)"
           echo ""
-          echo "🏗️  Architecture: linux/amd64"
+          echo "🏗️  Architecture: linux/amd64 (single platform)"
           echo "🔧 Build Type: Development image with FastAPI"
-          echo "📋 Milestone: M0 (Foundation)"
+          echo "📋 Branch: ${{ github.ref_name }}"
           echo ""
           echo "📥 Quick Start:"
-          echo "docker run -d -p 8080:8080 dextaco/harbor:latest"
+          echo "docker run -d -p 8080:8080 $(echo $TAGS | cut -d',' -f1)"
           echo "# Then visit http://localhost:8080"
-          echo ""
-          echo "🔗 Available Endpoints:"
-          echo "• / - Harbor information"
-          echo "• /healthz - Health check"
-          echo "• /readyz - Readiness check"
-          echo "• /version - Version information"
-          echo "• /docs - FastAPI documentation"
-          echo ""
-          echo "🔗 Repository Links:"
-          echo "• https://hub.docker.com/r/dextaco/harbor"
-          echo "• https://github.com/DeusExTaco/harbor/pkgs/container/harbor"
