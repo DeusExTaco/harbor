@@ -32,7 +32,9 @@ jobs:
         platform:
           - linux/amd64
           - linux/arm64
-          - linux/arm/v7
+          # Temporarily disabled ARM v7 due to cryptography compilation issues
+          # Will re-enable once we have working application code
+          # - linux/arm/v7
 
     steps:
       - name: Checkout code

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # Harbor Container Updater - Production Dockerfile
-# Supports multi-architecture builds: amd64, arm64, armv7 (Raspberry Pi)
+# Supports multi-architecture builds: amd64, arm64
 
 ARG PYTHON_VERSION=3.13
 ARG TARGETPLATFORM
@@ -11,7 +11,7 @@ ARG BUILDPLATFORM=linux/amd64
 # =============================================================================
 FROM python:${PYTHON_VERSION}-slim AS base
 
-# Install system dependencies with flexible version patterns
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     curl \
@@ -35,7 +35,7 @@ ENV PYTHONUNBUFFERED=1 \
 # =============================================================================
 FROM base AS builder
 
-# Install build dependencies with flexible version patterns
+# Install build dependencies
 RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     build-essential \
@@ -49,30 +49,11 @@ WORKDIR /app
 COPY requirements/base.txt requirements/production.txt ./requirements/
 COPY pyproject.toml ./
 
-# Debug: Show platform information
-RUN echo "=== Build Information ===" && \
-    echo "TARGETPLATFORM: ${TARGETPLATFORM}" && \
-    echo "BUILDPLATFORM: ${BUILDPLATFORM}" && \
-    uname -a && \
-    python --version && \
-    pip --version
-
-# Install Python dependencies with proper error handling
-RUN set -e && \
-    pip install --upgrade pip && \
-    echo "Installing dependencies for platform: ${TARGETPLATFORM}" && \
-    if pip install --user --no-warn-script-location \
+# Install Python dependencies
+RUN pip install --upgrade pip && \
+    pip install --user --no-warn-script-location \
         -r requirements/base.txt \
-        -r requirements/production.txt; then \
-        echo "Standard installation succeeded"; \
-    else \
-        echo "Standard installation failed, trying ARM-compatible fallback..."; \
-        pip install --user --no-warn-script-location \
-            --prefer-binary \
-            --no-build-isolation \
-            -r requirements/base.txt \
-            -r requirements/production.txt; \
-    fi
+        -r requirements/production.txt
 
 # =============================================================================
 # Production runtime stage
@@ -94,16 +75,13 @@ COPY --chown=harbor:harbor pyproject.toml README.md LICENSE ./
 RUN mkdir -p /app/data /app/logs /app/config /app/backups && \
     chown -R harbor:harbor /app
 
-# Platform-specific optimizations
+# Platform-specific optimizations for ARM
 ARG TARGETPLATFORM
-RUN echo "Building for platform: $TARGETPLATFORM" && \
-    if [ "$TARGETPLATFORM" = "linux/arm/v7" ] || [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
-        echo "Applying ARM optimizations" && \
-        { \
-            echo 'HARBOR_MAX_WORKERS=2'; \
-            echo 'MAX_CONCURRENT_UPDATES=1'; \
-            echo 'DATABASE_POOL_SIZE=3'; \
-        } >> /app/.env.arm; \
+RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
+        echo "Applying ARM64 optimizations" && \
+        echo 'HARBOR_MAX_WORKERS=2' >> /app/.env.arm && \
+        echo 'MAX_CONCURRENT_UPDATES=1' >> /app/.env.arm && \
+        echo 'DATABASE_POOL_SIZE=3' >> /app/.env.arm; \
     fi
 
 # Switch to non-root user
@@ -141,21 +119,10 @@ CMD ["python", "-m", "uvicorn", "app.main:create_app", "--factory", "--host", "0
 # =============================================================================
 FROM builder AS development
 
-# Install development dependencies with proper error handling
+# Install development dependencies
 COPY requirements/development.txt ./requirements/
-RUN set -e && \
-    pip install --upgrade pip && \
-    echo "Installing development dependencies for platform: ${TARGETPLATFORM}" && \
-    if pip install --user --no-warn-script-location \
-        -r requirements/development.txt; then \
-        echo "Standard dev installation succeeded"; \
-    else \
-        echo "Standard dev installation failed, trying ARM-compatible fallback..."; \
-        pip install --user --no-warn-script-location \
-            --prefer-binary \
-            --no-build-isolation \
-            -r requirements/development.txt; \
-    fi
+RUN pip install --user --no-warn-script-location \
+    -r requirements/development.txt
 
 # Copy application code with development setup
 WORKDIR /app
@@ -165,7 +132,7 @@ COPY --chown=harbor:harbor . .
 RUN mkdir -p /app/data /app/logs /app/config && \
     chown -R harbor:harbor /app
 
-# Install development tools with flexible version patterns
+# Install development tools
 RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     vim \
