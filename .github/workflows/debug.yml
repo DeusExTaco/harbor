@@ -1,0 +1,133 @@
+name: Debug Workflow
+
+on:
+  workflow_dispatch:  # Manual trigger only
+  push:
+    branches: [debug]  # Only run on debug branch
+
+jobs:
+  debug-environment:
+    name: Debug Environment
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check repository structure
+        run: |
+          echo "🔍 Repository Structure:"
+          echo "📁 Root files:"
+          ls -la
+          echo ""
+          echo "📁 Requirements directory:"
+          if [ -d "requirements" ]; then
+            ls -la requirements/
+            echo ""
+            echo "📄 Base requirements content:"
+            head -20 requirements/base.txt || echo "No base.txt found"
+          else
+            echo "❌ No requirements directory found"
+          fi
+          echo ""
+          echo "📁 App directory:"
+          if [ -d "app" ]; then
+            ls -la app/
+          else
+            echo "❌ No app directory found"
+          fi
+          echo ""
+          echo "📁 Deploy directory:"
+          if [ -d "deploy" ]; then
+            find deploy -name "*.dockerfile" -o -name "Dockerfile*"
+          else
+            echo "❌ No deploy directory found"
+          fi
+
+      - name: Check GitHub secrets
+        run: |
+          echo "🔐 Checking GitHub environment:"
+          echo "GitHub Actor: ${{ github.actor }}"
+          echo "GitHub Repository: ${{ github.repository }}"
+          echo "GitHub Ref: ${{ github.ref }}"
+          echo "GitHub Event: ${{ github.event_name }}"
+          echo ""
+          echo "🔑 Secret availability:"
+          if [ -n "${{ secrets.GITHUB_TOKEN }}" ]; then
+            echo "✅ GITHUB_TOKEN is available"
+          else
+            echo "❌ GITHUB_TOKEN is not available"
+          fi
+
+      - name: Test Docker build
+        run: |
+          echo "🐳 Testing Docker build capability:"
+
+          # Check if Dockerfile.dev exists
+          if [ -f "deploy/docker/Dockerfile.dev" ]; then
+            echo "✅ Found Dockerfile.dev"
+            echo "📄 Dockerfile.dev content (first 20 lines):"
+            head -20 deploy/docker/Dockerfile.dev
+            echo ""
+            echo "🔨 Attempting to build..."
+            if docker build -t harbor:debug -f deploy/docker/Dockerfile.dev .; then
+              echo "✅ Docker build succeeded"
+              docker images harbor:debug
+            else
+              echo "❌ Docker build failed"
+            fi
+          else
+            echo "❌ No Dockerfile.dev found"
+          fi
+
+      - name: Test Python environment
+        run: |
+          echo "🐍 Testing Python environment:"
+          python --version
+          pip --version
+          echo ""
+          echo "📦 Installing requirements..."
+          if [ -f "requirements/base.txt" ]; then
+            pip install -r requirements/base.txt || echo "⚠️  Some requirements failed"
+          fi
+          echo ""
+          echo "🧪 Testing imports:"
+          python -c "
+          try:
+              import fastapi
+              print('✅ FastAPI available')
+          except ImportError:
+              print('❌ FastAPI not available')
+
+          try:
+              import sqlalchemy
+              print('✅ SQLAlchemy available')
+          except ImportError:
+              print('❌ SQLAlchemy not available')
+
+          try:
+              import app
+              print('✅ Harbor app module available')
+          except ImportError as e:
+              print(f'ℹ️  Harbor app not available: {e}')
+          "
+
+      - name: Test GitHub Container Registry access
+        run: |
+          echo "📦 Testing GHCR access:"
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          if [ $? -eq 0 ]; then
+            echo "✅ GHCR login successful"
+
+            # Try to pull any existing image
+            IMAGE_REF="ghcr.io/deusextaco/harbor:develop"
+            echo "🔍 Checking for existing image: ${IMAGE_REF}"
+            if docker pull "${IMAGE_REF}" 2>/dev/null; then
+              echo "✅ Found existing image: ${IMAGE_REF}"
+              docker images "${IMAGE_REF}"
+            else
+              echo "ℹ️  No existing image found (expected for new repository)"
+            fi
+          else
+            echo "❌ GHCR login failed"
+          fi

@@ -8,6 +8,8 @@ that the Harbor application is running correctly inside a container.
 Exit codes:
 - 0: Healthy
 - 1: Unhealthy
+
+Part of Harbor Container Updater M0 milestone (Foundation).
 """
 
 import json
@@ -79,19 +81,31 @@ def check_health() -> dict[str, Any]:
 
 
 def main() -> int:
-    """Main health check function."""
+    """
+    Main health check function.
+
+    Returns:
+        int: 0 if healthy, 1 if unhealthy
+    """
     try:
         result = check_health()
 
         if result["status"] == "healthy":
             print("✅ Harbor is healthy")
             if "response" in result and isinstance(result["response"], dict):
-                print(f"   Status: {result['response'].get('status', 'OK')}")
-                print(f"   Version: {result['response'].get('version', 'unknown')}")
+                response_data = result["response"]
+                print(f"   Status: {response_data.get('status', 'OK')}")
+                print(f"   Version: {response_data.get('version', 'unknown')}")
+                print(f"   Milestone: {response_data.get('milestone', 'unknown')}")
+                print(
+                    f"   Profile: {response_data.get('deployment_profile', 'unknown')}"
+                )
             return 0
         else:
             print("❌ Harbor is unhealthy")
             print(f"   Error: {result.get('error', 'Unknown error')}")
+            if "url" in result:
+                print(f"   URL: {result['url']}")
             return 1
 
     except Exception as e:
