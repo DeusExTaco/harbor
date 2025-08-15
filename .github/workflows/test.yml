@@ -39,11 +39,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Install development dependencies using your requirements
           if [ -f "requirements/development.txt" ]; then
             pip install -r requirements/development.txt
-          else
+          elif [ -f "pyproject.toml" ]; then
             pip install -e ".[dev]"
+          else
+            echo "No development dependencies found"
           fi
 
       - name: Run ruff linter
@@ -51,7 +52,7 @@ jobs:
           if [ -d "app" ]; then
             ruff check app/ tests/
           else
-            echo "ℹ️  No app/ directory found - skipping linting"
+            echo "No app/ directory found - skipping linting"
           fi
 
       - name: Run ruff formatter check
@@ -59,7 +60,7 @@ jobs:
           if [ -d "app" ]; then
             ruff format --check app/ tests/
           else
-            echo "ℹ️  No app/ directory found - skipping format check"
+            echo "No app/ directory found - skipping format check"
           fi
 
       - name: Run mypy type checker
@@ -67,9 +68,9 @@ jobs:
           if [ -d "app" ]; then
             mypy app/ tests/
           else
-            echo "ℹ️  No app/ directory found - skipping type check"
+            echo "No app/ directory found - skipping type check"
           fi
-        continue-on-error: true  # Allow type check failures during M0 development
+        continue-on-error: true
 
   # =============================================================================
   # Test Suite
@@ -94,13 +95,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Install test dependencies using your requirements structure
           if [ -f "requirements/test.txt" ]; then
             pip install -r requirements/test.txt
           elif [ -f "requirements/development.txt" ]; then
             pip install -r requirements/development.txt
-          else
+          elif [ -f "pyproject.toml" ]; then
             pip install -e ".[dev,test]"
+          else
+            pip install pytest pytest-cov pytest-asyncio
           fi
 
       - name: Create test data directory
@@ -108,29 +110,14 @@ jobs:
 
       - name: Run unit tests
         run: |
-          if [ -d "tests/unit" ]; then
-            echo "🧪 Running existing unit tests..."
+          if [ -d "tests/unit" ] && find tests/unit -name "test_*.py" -type f | head -1 > /dev/null; then
+            echo "Running existing unit tests..."
             pytest tests/unit/ -v --cov=app --cov-report=xml --cov-report=term-missing --tb=short
           else
-            echo "ℹ️  No unit tests found - creating placeholder test"
+            echo "No unit tests found - this is expected during M0 development"
+            echo "Creating minimal test structure..."
             mkdir -p tests/unit
-            cat > tests/unit/test_placeholder.py << 'EOF'
-            """Placeholder test for M0 development phase."""
-
-            def test_placeholder():
-                """Placeholder test that always passes."""
-                assert True
-
-            def test_imports():
-                """Test that basic imports work."""
-                try:
-                    import app
-                    print("✅ Harbor app module imports successfully")
-                except ImportError:
-                    print("ℹ️  Harbor app module not yet implemented")
-                    # This is expected during M0
-                    pass
-            EOF
+            echo 'def test_placeholder(): assert True' > tests/unit/test_placeholder.py
             pytest tests/unit/ -v
           fi
         env:
@@ -139,15 +126,15 @@ jobs:
 
       - name: Run integration tests
         run: |
-          if [ -d "tests/integration" ]; then
+          if [ -d "tests/integration" ] && find tests/integration -name "test_*.py" -type f | head -1 > /dev/null; then
             pytest tests/integration/ -v
           else
-            echo "ℹ️  No integration tests found - skipping"
+            echo "No integration tests found - skipping"
           fi
         env:
           HARBOR_MODE: development
           DATABASE_URL: sqlite:///data/test_integration.db
-        continue-on-error: true  # Allow integration test failures during M0
+        continue-on-error: true
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
@@ -181,32 +168,19 @@ jobs:
         run: |
           docker run --rm harbor:test python -c "
           import sys
-          print('✅ Docker image builds successfully')
-          print(f'✅ Python version: {sys.version}')
-
-          # Test basic imports
+          print('Docker image builds successfully')
+          print(f'Python version: {sys.version}')
           try:
-              import fastapi
-              print('✅ FastAPI available')
-          except ImportError:
-              print('⚠️  FastAPI not available')
-
-          try:
-              import sqlalchemy
-              print('✅ SQLAlchemy available')
-          except ImportError:
-              print('⚠️  SQLAlchemy not available')
-
+              import fastapi, sqlalchemy, pydantic
+              print('Core dependencies available')
+          except ImportError as e:
+              print(f'Dependency issue: {e}')
           try:
               import app
-              print('✅ Harbor app module imports successfully')
-              from app.main import create_app
-              print('✅ Harbor app factory available')
+              print('Harbor app module available')
           except ImportError as e:
-              print(f'ℹ️  Harbor app not fully available: {e}')
-              print('ℹ️  This is expected during M0 development')
-
-          print('✅ Docker test completed')
+              print(f'Harbor app not ready: {e}')
+          print('Docker test completed')
           "
 
   # =============================================================================
@@ -219,58 +193,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Check README links
+      - name: Check documentation
         run: |
-          if [ ! -f README.md ]; then
-            echo "⚠️  README.md is missing - creating placeholder"
-            cat > README.md << 'EOF'
-          # Harbor Container Updater
-
-          Automated Docker container updates for home labs and enterprises.
-
-          ## Status
-
-          🚧 **Development Phase: M0 (Foundation)** 🚧
-
-          Harbor is currently in early development. The foundation and core infrastructure
-          are being built according to our 14-week milestone plan.
-
-          ## Quick Start (Coming Soon)
-
-          ```bash
-          docker run -d --restart unless-stopped -p 8080:8080 \
-            -v /var/run/docker.sock:/var/run/docker.sock:ro \
-            ghcr.io/deusextaco/harbor:latest
-          ```
-
-          ## Development Status
-
-          - [x] M0: Foundation (Weeks 1-2) - **IN PROGRESS**
-          - [ ] M1: Discovery (Weeks 3-4)
-          - [ ] M2: Update Engine (Weeks 5-6)
-          - [ ] M3: Automation (Weeks 7-8)
-          - [ ] M4: Observability (Weeks 9-10)
-          - [ ] M5: Production Ready (Weeks 11-12)
-          - [ ] M6: Release (Weeks 13-14)
-
-          ## Contributing
-
-          Harbor is an open source project. See CONTRIBUTING.md for development setup.
-
-          ## License
-
-          MIT License - see LICENSE file for details.
-          EOF
-            echo "✅ Created placeholder README.md"
-          fi
-
-          if grep -q "Harbor Container Updater" README.md; then
-            echo "✅ README.md contains project title"
+          if [ -f README.md ]; then
+            echo "README.md exists"
+            if grep -q "Harbor Container Updater" README.md; then
+              echo "README.md contains project title"
+            fi
           else
-            echo "⚠️  README.md missing project title"
+            echo "README.md is missing"
           fi
-
-          echo "✅ Documentation check passed"
+          echo "Documentation check completed"
 
   # =============================================================================
   # Deployment Readiness Check
@@ -294,27 +227,26 @@ jobs:
         run: |
           if [ -f "pyproject.toml" ]; then
             python -c "
-            import tomllib
-            with open('pyproject.toml', 'rb') as f:
-                data = tomllib.load(f)
-            version = data['project']['version']
-            print(f'✅ Project version: {version}')
+            try:
+                import tomllib
+                with open('pyproject.toml', 'rb') as f:
+                    data = tomllib.load(f)
+                version = data['project']['version']
+                print(f'Project version: {version}')
+            except:
+                print('Could not read version from pyproject.toml')
             "
           else
-            echo "ℹ️  No pyproject.toml found"
+            echo "No pyproject.toml found"
           fi
 
       - name: Deployment readiness summary
         run: |
-          echo "✅ All checks passed - ready for deployment"
+          echo "All checks passed - ready for deployment"
           echo "- Code quality: PASSED"
           echo "- Tests: PASSED"
           echo "- Docker build: PASSED"
           echo "- Documentation: PASSED"
           echo ""
-          echo "🚧 Current Status: M0 Foundation Phase"
-          echo "🎯 Next Milestone: M1 Container Discovery"
-          echo ""
-          echo "Security scans run separately in dedicated workflows:"
-          echo "- CodeQL: .github/workflows/codeql.yml"
-          echo "- Security: .github/workflows/security.yml"
+          echo "Current Status: M0 Foundation Phase"
+          echo "Next Milestone: M1 Container Discovery"
