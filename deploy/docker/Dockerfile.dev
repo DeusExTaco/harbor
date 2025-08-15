@@ -3,7 +3,7 @@
 
 FROM python:3.13-slim
 
-# Install system dependencies with more flexible version patterns
+# Install system dependencies with flexible versions
 RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     curl \
@@ -29,7 +29,7 @@ ENV PYTHONUNBUFFERED=1 \
 COPY requirements/ ./requirements/
 COPY pyproject.toml ./
 
-# Install all dependencies including development tools
+# Install all dependencies with flexible pip version
 RUN pip install --upgrade pip && \
     pip install -e ".[dev]"
 

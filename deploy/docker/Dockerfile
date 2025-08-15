@@ -11,12 +11,12 @@ ARG BUILDPLATFORM=linux/amd64
 # =============================================================================
 FROM python:${PYTHON_VERSION}-slim AS base
 
-# Install system dependencies and security updates with exact pinned versions
+# Install system dependencies with flexible version patterns
 RUN apt-get update && apt-get install -y \
     --no-install-recommends \
-    curl=8.14.1-2 \
-    ca-certificates=20250419 \
-    tzdata=2024b-3 \
+    curl \
+    ca-certificates \
+    tzdata \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -35,11 +35,11 @@ ENV PYTHONUNBUFFERED=1 \
 # =============================================================================
 FROM base AS builder
 
-# Install build dependencies with exact pinned versions
+# Install build dependencies with flexible version patterns
 RUN apt-get update && apt-get install -y \
     --no-install-recommends \
-    build-essential=12.12-1 \
-    git=1:2.47.2-0.2 \
+    build-essential \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -59,7 +59,7 @@ RUN echo "=== Build Information ===" && \
 
 # Install Python dependencies with proper error handling
 RUN set -e && \
-    pip install --upgrade pip==24.3.1 && \
+    pip install --upgrade pip && \
     echo "Installing dependencies for platform: ${TARGETPLATFORM}" && \
     if pip install --user --no-warn-script-location \
         -r requirements/base.txt \
@@ -144,7 +144,7 @@ FROM builder AS development
 # Install development dependencies with proper error handling
 COPY requirements/development.txt ./requirements/
 RUN set -e && \
-    pip install --upgrade pip==24.3.1 && \
+    pip install --upgrade pip && \
     echo "Installing development dependencies for platform: ${TARGETPLATFORM}" && \
     if pip install --user --no-warn-script-location \
         -r requirements/development.txt; then \
@@ -165,11 +165,11 @@ COPY --chown=harbor:harbor . .
 RUN mkdir -p /app/data /app/logs /app/config && \
     chown -R harbor:harbor /app
 
-# Install development tools with exact pinned versions
+# Install development tools with flexible version patterns
 RUN apt-get update && apt-get install -y \
     --no-install-recommends \
-    vim=2:9.1.0861-1 \
-    htop=3.4.0-1 \
+    vim \
+    htop \
     && rm -rf /var/lib/apt/lists/*
 
 # Switch to non-root user
