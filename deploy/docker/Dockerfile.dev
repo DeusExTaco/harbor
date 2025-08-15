@@ -1,20 +1,13 @@
 # Harbor Container Updater - Development Dockerfile
 # Optimized for fast development cycles with hot reload
-# Supports build arguments for multi-architecture optimization
-
-# Accept build arguments for multi-platform builds (for CI compatibility)
-ARG BUILDPLATFORM=linux/amd64
-ARG TARGETPLATFORM=linux/amd64
-ARG DEBIAN_FRONTEND=noninteractive
-ARG PIP_DISABLE_PIP_VERSION_CHECK=1
-ARG PYTHONDONTWRITEBYTECODE=1
 
 FROM python:3.13-slim
 
-# Set environment variables directly (avoids undefined variable warnings)
-ENV DEBIAN_FRONTEND=noninteractive \
+# Set optimization environment variables directly
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    DEBIAN_FRONTEND=noninteractive
 
 # Install system dependencies with flexible versions
 RUN apt-get update && apt-get install -y \

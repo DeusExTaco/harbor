@@ -130,19 +130,12 @@ db-reset: ## Reset database (WARNING: destroys all data)
 # Docker Development
 # =============================================================================
 
+
 docker-build: ## Build development Docker image
-	docker build -t harbor:dev \
-		--build-arg DEBIAN_FRONTEND=noninteractive \
-		--build-arg PIP_DISABLE_PIP_VERSION_CHECK=1 \
-		--build-arg PYTHONDONTWRITEBYTECODE=1 \
-		-f deploy/docker/Dockerfile.dev .
+	docker build -t harbor:dev -f deploy/docker/Dockerfile.dev .
 
 docker-build-prod: ## Build production Docker image
-	docker build -t harbor:latest \
-		--build-arg DEBIAN_FRONTEND=noninteractive \
-		--build-arg PIP_DISABLE_PIP_VERSION_CHECK=1 \
-		--build-arg PYTHONDONTWRITEBYTECODE=1 \
-		-f deploy/docker/Dockerfile .
+	docker build -t harbor:latest -f deploy/docker/Dockerfile .
 
 
 docker-build-multi: ## Build multi-architecture images locally

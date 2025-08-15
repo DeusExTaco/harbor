@@ -104,7 +104,7 @@ jobs:
           echo "dockerfile=deploy/docker/Dockerfile.dev" >> $GITHUB_OUTPUT
           echo "Using standard development Dockerfile with ARM64 optimizations"
 
-      # Build and push to Docker Hub (simplified caching)
+      # Build and push to Docker Hub (no caching)
       - name: Build and push to Docker Hub by digest
         id: build-dockerhub
         if: github.event_name != 'pull_request'
@@ -116,17 +116,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
           outputs: type=image,name=dextaco/harbor,push-by-digest=true,name-canonical=true,push=true
-          # Simplified caching strategy (fixed)
-          cache-from: type=gha,scope=dockerhub-${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=dockerhub-${{ matrix.platform }}
           build-args: |
             BUILDPLATFORM=linux/amd64
             TARGETPLATFORM=${{ matrix.platform }}
-            DEBIAN_FRONTEND=noninteractive
-            PIP_DISABLE_PIP_VERSION_CHECK=1
-            PYTHONDONTWRITEBYTECODE=1
 
-      # Build and push to GHCR (simplified caching)
+      # Build and push to GHCR (no caching)
       - name: Build and push to GHCR by digest
         id: build-ghcr
         if: github.event_name != 'pull_request'
@@ -138,18 +132,12 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
           outputs: type=image,name=ghcr.io/deusextaco/harbor,push-by-digest=true,name-canonical=true,push=true
-          # Simplified caching strategy (fixed)
-          cache-from: type=gha,scope=ghcr-${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=ghcr-${{ matrix.platform }}
           build-args: |
             BUILDPLATFORM=linux/amd64
             TARGETPLATFORM=${{ matrix.platform }}
-            DEBIAN_FRONTEND=noninteractive
-            PIP_DISABLE_PIP_VERSION_CHECK=1
-            PYTHONDONTWRITEBYTECODE=1
 
-      # Build only for PR (no push) with simple cache
-      - name: Build for PR validation (cached)
+      # Build only for PR (no push, no caching)
+      - name: Build for PR validation
         id: build-pr
         if: github.event_name == 'pull_request'
         uses: docker/build-push-action@v5
@@ -160,12 +148,9 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
           push: false
-          cache-from: type=gha,scope=pr-${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=pr-${{ matrix.platform }}
           build-args: |
             BUILDPLATFORM=linux/amd64
             TARGETPLATFORM=${{ matrix.platform }}
-            DEBIAN_FRONTEND=noninteractive
 
       # Export Docker Hub digest
       - name: Export Docker Hub digest
