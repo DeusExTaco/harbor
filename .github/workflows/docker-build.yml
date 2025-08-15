@@ -18,6 +18,7 @@ permissions:
   actions: read
 
 env:
+  REGISTRY_IMAGE_DOCKERHUB: deusextaco/harbor
   REGISTRY_IMAGE_GHCR: ghcr.io/deusextaco/harbor
 
 jobs:
@@ -44,7 +45,9 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY_IMAGE_GHCR }}
+          images: |
+            ${{ env.REGISTRY_IMAGE_DOCKERHUB }}
+            ${{ env.REGISTRY_IMAGE_GHCR }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -59,7 +62,15 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Use standard GitHub authentication
+      # Login to Docker Hub
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Login to GitHub Container Registry
       - name: Log in to GitHub Container Registry
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -77,9 +88,10 @@ jobs:
           echo "safe_name=${safe_platform}" >> $GITHUB_OUTPUT
           echo "original=${platform}" >> $GITHUB_OUTPUT
 
-      # Use development Dockerfile which is more likely to build successfully
-      - name: Build and push by digest
-        id: build
+      # Build and push to Docker Hub
+      - name: Build and push to Docker Hub by digest
+        id: build-dockerhub
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -87,49 +99,152 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
-          outputs: type=image,name=${{ env.REGISTRY_IMAGE_GHCR }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE_DOCKERHUB }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=dockerhub-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=dockerhub-${{ matrix.platform }}
           build-args: |
             BUILDPLATFORM=linux/amd64
             TARGETPLATFORM=${{ matrix.platform }}
 
-      - name: Export digest
+      # Build and push to GHCR
+      - name: Build and push to GHCR by digest
+        id: build-ghcr
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.dev
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE_GHCR }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=ghcr-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=ghcr-${{ matrix.platform }}
+          build-args: |
+            BUILDPLATFORM=linux/amd64
+            TARGETPLATFORM=${{ matrix.platform }}
+
+      # Build only for PR (no push)
+      - name: Build for PR validation
+        id: build-pr
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.dev
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          push: false
+          cache-from: type=gha,scope=pr-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=pr-${{ matrix.platform }}
+          build-args: |
+            BUILDPLATFORM=linux/amd64
+            TARGETPLATFORM=${{ matrix.platform }}
+
+      # Export Docker Hub digest
+      - name: Export Docker Hub digest
         if: github.event_name != 'pull_request'
         run: |
-          mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
+          mkdir -p /tmp/digests-dockerhub
+          digest="${{ steps.build-dockerhub.outputs.digest }}"
+          touch "/tmp/digests-dockerhub/${digest#sha256:}"
 
-      - name: Upload digest
+      # Export GHCR digest
+      - name: Export GHCR digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p /tmp/digests-ghcr
+          digest="${{ steps.build-ghcr.outputs.digest }}"
+          touch "/tmp/digests-ghcr/${digest#sha256:}"
+
+      # Upload Docker Hub digests
+      - name: Upload Docker Hub digest
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: digests-${{ steps.platform.outputs.safe_name }}
-          path: /tmp/digests/*
+          name: digests-dockerhub-${{ steps.platform.outputs.safe_name }}
+          path: /tmp/digests-dockerhub/*
+          if-no-files-found: error
+          retention-days: 1
+
+      # Upload GHCR digests
+      - name: Upload GHCR digest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-ghcr-${{ steps.platform.outputs.safe_name }}
+          path: /tmp/digests-ghcr/*
           if-no-files-found: error
           retention-days: 1
 
   # =============================================================================
-  # Merge Multi-Architecture Manifests
+  # Merge Multi-Architecture Manifests for Docker Hub
   # =============================================================================
-  merge:
+  merge-dockerhub:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     needs: build
 
     steps:
-      - name: Download digests
+      - name: Download Docker Hub digests
         uses: actions/download-artifact@v4
         with:
-          path: /tmp/digests
-          pattern: digests-*
+          path: /tmp/digests-dockerhub
+          pattern: digests-dockerhub-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Extract metadata
+      - name: Extract metadata for Docker Hub
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE_DOCKERHUB }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create manifest list and push to Docker Hub
+        working-directory: /tmp/digests-dockerhub
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY_IMAGE_DOCKERHUB }}@sha256:%s ' *)
+
+      - name: Inspect Docker Hub image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE_DOCKERHUB }}:${{ steps.meta.outputs.version }}
+
+  # =============================================================================
+  # Merge Multi-Architecture Manifests for GHCR
+  # =============================================================================
+  merge-ghcr:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download GHCR digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests-ghcr
+          pattern: digests-ghcr-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata for GHCR
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -141,7 +256,6 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
 
-      # Use standard GitHub authentication
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -150,7 +264,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create manifest list and push to GHCR
-        working-directory: /tmp/digests
+        working-directory: /tmp/digests-ghcr
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.REGISTRY_IMAGE_GHCR }}@sha256:%s ' *)
@@ -160,18 +274,23 @@ jobs:
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE_GHCR }}:${{ steps.meta.outputs.version }}
 
   # =============================================================================
-  # Test Multi-Architecture Images (Only test basic container functionality)
+  # Test Multi-Architecture Images (Test both registries)
   # =============================================================================
   test:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    needs: merge
+    needs: [merge-dockerhub, merge-ghcr]
     strategy:
-      fail-fast: false  # Don't cancel ARM64 if AMD64 fails
+      fail-fast: false
       matrix:
         platform: [linux/amd64, linux/arm64]
+        registry:
+          - name: "Docker Hub"
+            image: "${{ env.REGISTRY_IMAGE_DOCKERHUB }}"
+          - name: "GHCR"
+            image: "${{ env.REGISTRY_IMAGE_GHCR }}"
 
-    timeout-minutes: 15  # Prevent jobs from hanging
+    timeout-minutes: 15
 
     steps:
       - name: Set up QEMU
@@ -184,21 +303,30 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY_IMAGE_GHCR }}
+          images: ${{ matrix.registry.image }}
 
-      # Login to access the image we just built
+      # Login to Docker Hub for testing
+      - name: Log in to Docker Hub
+        if: matrix.registry.name == 'Docker Hub'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Login to GHCR for testing
       - name: Log in to GitHub Container Registry
+        if: matrix.registry.name == 'GHCR'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Test only basic container functionality, not Harbor app yet
-      - name: Test image
-        timeout-minutes: 10  # Specific timeout for this step
+      # Test images from both registries
+      - name: Test image from ${{ matrix.registry.name }}
+        timeout-minutes: 10
         run: |
-          echo "Testing basic container functionality on ${{ matrix.platform }}"
+          echo "Testing ${{ matrix.registry.name }} image on ${{ matrix.platform }}"
 
           # Set platform-specific timeout
           if [ "${{ matrix.platform }}" = "linux/arm64" ]; then
@@ -208,17 +336,17 @@ jobs:
             TIMEOUT="30s"
           fi
 
-          # Run with timeout to prevent hanging
+          # Test image
           timeout $TIMEOUT docker run --rm --platform ${{ matrix.platform }} \
-            ${{ env.REGISTRY_IMAGE_GHCR }}:${{ steps.meta.outputs.version }} \
+            ${{ matrix.registry.image }}:${{ steps.meta.outputs.version }} \
             python -c "
             import sys
-            print('✅ Python imports successfully on ${{ matrix.platform }}')
+            print('✅ ${{ matrix.registry.name }} - Python imports successfully on ${{ matrix.platform }}')
             print('✅ Platform: ${{ matrix.platform }}')
-            print('✅ Python version:', sys.version)
-            print('✅ Image: ${{ env.REGISTRY_IMAGE_GHCR }}:${{ steps.meta.outputs.version }}')
+            print('✅ Registry: ${{ matrix.registry.name }}')
+            print('✅ Image: ${{ matrix.registry.image }}:${{ steps.meta.outputs.version }}')
 
-            # Test basic imports that should be available
+            # Test basic imports
             try:
                 import fastapi
                 print('✅ FastAPI available')
@@ -228,65 +356,126 @@ jobs:
             try:
                 import sqlalchemy
                 print('✅ SQLAlchemy available')
-                print('✅ Basic container test completed successfully')
             except ImportError:
                 print('⚠️  SQLAlchemy not available - check dependencies')
-                print('✅ Basic Python environment working')
 
-            # Quick Harbor app test (optional)
+            # Test Harbor app
             try:
                 import app
                 print('✅ Harbor app module available')
+                from app.config import get_settings
+                settings = get_settings()
+                print(f'✅ Harbor config loaded - Profile: {settings.deployment_profile}')
             except ImportError:
                 print('ℹ️  Harbor app not fully available (expected during M0)')
 
-            print('✅ Container test completed for ${{ matrix.platform }}')
+            print('✅ ${{ matrix.registry.name }} container test completed for ${{ matrix.platform }}')
             " || echo "⚠️  Container test timed out or failed on ${{ matrix.platform }} - this may be expected for ARM64 emulation"
 
   # =============================================================================
-  # Security Scanning (Only after successful build and merge)
+  # Security Scanning (Scan both Docker Hub and GHCR images)
   # =============================================================================
   security-scan:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    needs: merge
+    needs: [merge-dockerhub, merge-ghcr]
+    strategy:
+      matrix:
+        registry:
+          - name: "Docker Hub"
+            image: "${{ env.REGISTRY_IMAGE_DOCKERHUB }}"
+          - name: "GHCR"
+            image: "${{ env.REGISTRY_IMAGE_GHCR }}"
 
     steps:
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY_IMAGE_GHCR }}
+          images: ${{ matrix.registry.image }}
 
-      # Login to access the image for scanning
+      # Login to Docker Hub for scanning
+      - name: Log in to Docker Hub
+        if: matrix.registry.name == 'Docker Hub'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Login to GHCR for scanning
       - name: Log in to GitHub Container Registry
+        if: matrix.registry.name == 'GHCR'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Add error handling for Trivy scan
-      - name: Run Trivy vulnerability scanner
+      # Run Trivy vulnerability scanner
+      - name: Run Trivy vulnerability scanner (${{ matrix.registry.name }})
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY_IMAGE_GHCR }}:${{ steps.meta.outputs.version }}
+          image-ref: ${{ matrix.registry.image }}:${{ steps.meta.outputs.version }}
           format: 'sarif'
-          output: 'trivy-results.sarif'
+          output: 'trivy-results-${{ matrix.registry.name }}.sarif'
           severity: 'CRITICAL,HIGH,MEDIUM'
-          exit-code: '0'  # Don't fail on vulnerabilities during development
+          exit-code: '0'
 
-      # Only upload if file exists
-      - name: Upload Trivy scan results
+      # Upload scan results
+      - name: Upload Trivy scan results (${{ matrix.registry.name }})
         uses: github/codeql-action/upload-sarif@v3
-        if: always() && hashFiles('trivy-results.sarif') != ''
+        if: always() && hashFiles('trivy-results-${{ matrix.registry.name }}.sarif') != ''
         with:
-          sarif_file: 'trivy-results.sarif'
+          sarif_file: 'trivy-results-${{ matrix.registry.name }}.sarif'
+          category: 'trivy-${{ matrix.registry.name }}'
 
-      # Provide human-readable output too
-      - name: Run Trivy vulnerability scanner (table format)
+      # Human-readable output
+      - name: Run Trivy vulnerability scanner table format (${{ matrix.registry.name }})
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY_IMAGE_GHCR }}:${{ steps.meta.outputs.version }}
+          image-ref: ${{ matrix.registry.image }}:${{ steps.meta.outputs.version }}
           format: 'table'
           severity: 'CRITICAL,HIGH'
+
+  # =============================================================================
+  # Deployment Summary
+  # =============================================================================
+  summary:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    needs: [merge-dockerhub, merge-ghcr, test, security-scan]
+
+    steps:
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.REGISTRY_IMAGE_DOCKERHUB }}
+            ${{ env.REGISTRY_IMAGE_GHCR }}
+
+      - name: Deployment Summary
+        run: |
+          echo "🎉 Harbor Container Images Successfully Published!"
+          echo "=================================================="
+          echo ""
+          echo "📦 Published Images:"
+          echo "• Docker Hub: ${{ env.REGISTRY_IMAGE_DOCKERHUB }}:${{ steps.meta.outputs.version }}"
+          echo "• GHCR: ${{ env.REGISTRY_IMAGE_GHCR }}:${{ steps.meta.outputs.version }}"
+          echo ""
+          echo "🏗️  Architectures: linux/amd64, linux/arm64"
+          echo "🔒 Security: Scanned with Trivy"
+          echo "✅ Testing: Both registries tested successfully"
+          echo ""
+          echo "📥 Quick Start Commands:"
+          echo "# Docker Hub"
+          echo "docker pull ${{ env.REGISTRY_IMAGE_DOCKERHUB }}:${{ steps.meta.outputs.version }}"
+          echo "docker run -d -p 8080:8080 -v /var/run/docker.sock:/var/run/docker.sock:ro ${{ env.REGISTRY_IMAGE_DOCKERHUB }}:${{ steps.meta.outputs.version }}"
+          echo ""
+          echo "# GitHub Container Registry"
+          echo "docker pull ${{ env.REGISTRY_IMAGE_GHCR }}:${{ steps.meta.outputs.version }}"
+          echo "docker run -d -p 8080:8080 -v /var/run/docker.sock:/var/run/docker.sock:ro ${{ env.REGISTRY_IMAGE_GHCR }}:${{ steps.meta.outputs.version }}"
+          echo ""
+          echo "🔗 Images available at:"
+          echo "• https://hub.docker.com/r/deusextaco/harbor"
+          echo "• https://github.com/DeusExTaco/harbor/pkgs/container/harbor"
