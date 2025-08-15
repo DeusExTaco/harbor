@@ -1,0 +1,204 @@
+name: Security Scanning
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+  schedule:
+    # Run security scans daily at 3 AM UTC
+    - cron: '0 3 * * *'
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+  issues: write
+
+jobs:
+  # =============================================================================
+  # Secret Scanning and Detection
+  # =============================================================================
+  secret-scan:
+    name: Secret Detection
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for comprehensive secret scanning
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+
+      - name: Install detect-secrets
+        run: |
+          pip install detect-secrets
+
+      - name: Run detect-secrets scan
+        run: |
+          detect-secrets scan --all-files --baseline .secrets.baseline
+
+      - name: Verify secrets baseline
+        run: |
+          detect-secrets audit .secrets.baseline --report
+
+  # =============================================================================
+  # Container Security Scanning
+  # =============================================================================
+  container-security:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Harbor image for scanning
+        run: |
+          docker build -t harbor:security-scan -f deploy/docker/Dockerfile .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'harbor:security-scan'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Upload Trivy scan results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: 'container-security'
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy filesystem results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-fs-results.sarif'
+          category: 'filesystem-security'
+
+  # =============================================================================
+  # Python Security Analysis
+  # =============================================================================
+  python-security:
+    name: Python Security Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run Bandit security analysis
+        run: |
+          bandit -r app/ -f sarif -o bandit-results.sarif
+        continue-on-error: true
+
+      - name: Upload Bandit results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'bandit-results.sarif'
+          category: 'python-security'
+
+      - name: Run pip-audit for dependency vulnerabilities
+        run: |
+          pip install pip-audit
+          pip-audit --format=sarif --output=pip-audit-results.sarif
+        continue-on-error: true
+
+      - name: Upload pip-audit results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'pip-audit-results.sarif'
+          category: 'dependency-security'
+
+  # =============================================================================
+  # Infrastructure Security
+  # =============================================================================
+  infrastructure-security:
+    name: Infrastructure Security
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Run Checkov for Infrastructure as Code security
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          framework: dockerfile,github_actions,secrets
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+          soft_fail: true
+
+      - name: Upload Checkov results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+          category: 'infrastructure-security'
+
+  # =============================================================================
+  # Security Report Generation
+  # =============================================================================
+  security-report:
+    name: Generate Security Report
+    runs-on: ubuntu-latest
+    needs: [secret-scan, container-security, python-security, infrastructure-security]
+    if: always()
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Generate security summary
+        run: |
+          echo "# Harbor Security Scan Summary" > security-summary.md
+          echo "Generated on: $(date)" >> security-summary.md
+          echo "" >> security-summary.md
+          echo "## Scan Results" >> security-summary.md
+          echo "- Secret Scan: ${{ needs.secret-scan.result }}" >> security-summary.md
+          echo "- Container Security: ${{ needs.container-security.result }}" >> security-summary.md
+          echo "- Python Security: ${{ needs.python-security.result }}" >> security-summary.md
+          echo "- Infrastructure Security: ${{ needs.infrastructure-security.result }}" >> security-summary.md
+          echo "" >> security-summary.md
+          echo "View detailed results in the Security tab of this repository." >> security-summary.md
+
+      - name: Upload security summary
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-summary
+          path: security-summary.md
+          retention-days: 30
