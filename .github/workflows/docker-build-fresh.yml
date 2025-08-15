@@ -75,6 +75,7 @@ jobs:
           push: true
           tags: dextaco/harbor:${{ steps.meta.outputs.version }},dextaco/harbor:latest
           labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=dextaco/harbor,push=true
 
       # Build and push to GHCR (AMD64)
       - name: Build and push to GHCR (AMD64)
@@ -86,6 +87,7 @@ jobs:
           push: true
           tags: ghcr.io/deusextaco/harbor:${{ steps.meta.outputs.version }},ghcr.io/deusextaco/harbor:latest
           labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=ghcr.io/deusextaco/harbor,push=true
 
       # Test the images work
       - name: Test Docker Hub image
