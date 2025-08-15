@@ -118,6 +118,7 @@ jobs:
           tags: ${{ needs.build-config.outputs.docker-tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE_DOCKERHUB }},push-by-digest=true,name-canonical=true,push=true
           labels: |
             org.opencontainers.image.title=Harbor Container Updater
             org.opencontainers.image.description=Automated Docker container updates
@@ -126,7 +127,7 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
 
-      # Build and push to GHCR
+      # Build and push to GHCR with explicit platform
       - name: Build and push to GHCR
         uses: docker/build-push-action@v5
         with:
@@ -137,6 +138,7 @@ jobs:
           tags: ${{ needs.build-config.outputs.ghcr-tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE_GHCR }},push-by-digest=true,name-canonical=true,push=true
           labels: |
             org.opencontainers.image.title=Harbor Container Updater
             org.opencontainers.image.description=Automated Docker container updates
@@ -144,6 +146,20 @@ jobs:
             org.opencontainers.image.version=0.1.0
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+
+      # Create proper manifest for Docker Hub
+      - name: Create manifest for Docker Hub
+        run: |
+          docker buildx imagetools create \
+            --tag ${{ needs.build-config.outputs.docker-tags }} \
+            ${{ env.REGISTRY_IMAGE_DOCKERHUB }}@${{ steps.build-dockerhub.outputs.digest }}
+
+      # Create proper manifest for GHCR
+      - name: Create manifest for GHCR
+        run: |
+          docker buildx imagetools create \
+            --tag ${{ needs.build-config.outputs.ghcr-tags }} \
+            ${{ env.REGISTRY_IMAGE_GHCR }}@${{ steps.build-ghcr.outputs.digest }}
 
   # =============================================================================
   # Image Testing

@@ -1,0 +1,95 @@
+name: Cleanup Unknown Packages
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+permissions:
+  packages: write
+  contents: read
+
+jobs:
+  cleanup-unknown:
+    name: Remove Unknown/Unknown Packages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Delete unknown/unknown packages from GHCR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const packageName = 'harbor';
+
+            try {
+              // Get all package versions
+              const { data: versions } = await github.rest.packages.getAllPackageVersionsForPackageOwnedByUser({
+                package_type: 'container',
+                package_name: packageName,
+                username: owner
+              });
+
+              console.log(`Found ${versions.length} package versions`);
+
+              // Look for unknown/unknown packages
+              const unknownVersions = versions.filter(version => {
+                const metadata = version.metadata?.container;
+                if (!metadata || !metadata.tags || metadata.tags.length === 0) {
+                  console.log(`Version ${version.id} has no tags - likely unknown/unknown`);
+                  return true;
+                }
+
+                // Check if this version has proper platform info
+                const hasProperPlatform = metadata.tags.some(tag => {
+                  console.log(`Version ${version.id} tag: ${tag}`);
+                  return tag !== 'unknown';
+                });
+
+                if (!hasProperPlatform) {
+                  console.log(`Version ${version.id} appears to be unknown/unknown`);
+                  return true;
+                }
+
+                return false;
+              });
+
+              console.log(`Found ${unknownVersions.length} unknown/unknown versions to delete`);
+
+              // Delete unknown versions
+              for (const version of unknownVersions) {
+                try {
+                  await github.rest.packages.deletePackageVersionForUser({
+                    package_type: 'container',
+                    package_name: packageName,
+                    username: owner,
+                    package_version_id: version.id
+                  });
+                  console.log(`✅ Deleted unknown version ${version.id}`);
+                } catch (error) {
+                  console.log(`❌ Failed to delete version ${version.id}: ${error.message}`);
+                }
+              }
+
+              if (unknownVersions.length === 0) {
+                console.log('✅ No unknown/unknown packages found');
+              }
+
+            } catch (error) {
+              console.log(`Error: ${error.message}`);
+              if (error.status === 404) {
+                console.log('Package not found - this is OK for a fresh repository');
+              }
+            }
+
+      - name: Cleanup summary
+        run: |
+          echo "🧹 GHCR Cleanup Complete!"
+          echo "========================"
+          echo ""
+          echo "✅ Cleaned up unknown/unknown packages"
+          echo "🔄 Next build should create clean linux/amd64 packages"
+          echo ""
+          echo "📋 Next steps:"
+          echo "1. Run the main CI/CD pipeline"
+          echo "2. Verify clean package creation"
+          echo "3. Check GHCR repository for proper platform tags"
