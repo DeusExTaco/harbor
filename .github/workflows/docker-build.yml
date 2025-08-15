@@ -18,7 +18,7 @@ permissions:
   actions: read
 
 env:
-  REGISTRY_IMAGE_DOCKERHUB: deusextaco/harbor
+  REGISTRY_IMAGE_DOCKERHUB: dextaco/harbor
   REGISTRY_IMAGE_GHCR: ghcr.io/deusextaco/harbor
 
 jobs:
@@ -46,8 +46,8 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ env.REGISTRY_IMAGE_DOCKERHUB }}
-            ${{ env.REGISTRY_IMAGE_GHCR }}
+            dextaco/harbor
+            ghcr.io/deusextaco/harbor
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -286,9 +286,9 @@ jobs:
         platform: [linux/amd64, linux/arm64]
         registry:
           - name: "Docker Hub"
-            image: "${{ env.REGISTRY_IMAGE_DOCKERHUB }}"
+            image: "dextaco/harbor"
           - name: "GHCR"
-            image: "${{ env.REGISTRY_IMAGE_GHCR }}"
+            image: "ghcr.io/deusextaco/harbor"
 
     timeout-minutes: 15
 
@@ -383,9 +383,9 @@ jobs:
       matrix:
         registry:
           - name: "Docker Hub"
-            image: "${{ env.REGISTRY_IMAGE_DOCKERHUB }}"
+            image: "dextaco/harbor"
           - name: "GHCR"
-            image: "${{ env.REGISTRY_IMAGE_GHCR }}"
+            image: "ghcr.io/deusextaco/harbor"
 
     steps:
       - name: Extract metadata
@@ -477,5 +477,5 @@ jobs:
           echo "docker run -d -p 8080:8080 -v /var/run/docker.sock:/var/run/docker.sock:ro ${{ env.REGISTRY_IMAGE_GHCR }}:${{ steps.meta.outputs.version }}"
           echo ""
           echo "🔗 Images available at:"
-          echo "• https://hub.docker.com/r/deusextaco/harbor"
+          echo "• https://hub.docker.com/r/dextaco/harbor"
           echo "• https://github.com/DeusExTaco/harbor/pkgs/container/harbor"
