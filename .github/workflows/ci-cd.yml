@@ -131,7 +131,7 @@ jobs:
             if [ "${{ github.event_name }}" != "pull_request" ]; then
               if [[ "${{ needs.docker-build.result }}" == "success" ]]; then
                 echo "- ✅ Docker images built and published" >> pipeline-summary.md
-                echo "- ✅ Multi-architecture support (amd64, arm64)" >> pipeline-summary.md
+                echo "- ✅ Single architecture support (amd64)" >> pipeline-summary.md
                 echo "- ✅ Available on Docker Hub and GHCR" >> pipeline-summary.md
 
                 if [[ "${{ needs.container-security.result }}" == "success" ]]; then
@@ -177,19 +177,13 @@ jobs:
           echo "- **Milestone**: ${{ env.HARBOR_MILESTONE }} (Foundation Phase)" >> pipeline-summary.md
           echo "- **Current Focus**: Building core infrastructure and CI/CD pipeline" >> pipeline-summary.md
           echo "- **Next Milestone**: M1 (Container Discovery & Registry Integration)" >> pipeline-summary.md
-          echo "" >> pipeline-summary.md
-          echo "## 🔗 Useful Links" >> pipeline-summary.md
-          echo "- [Repository](https://github.com/DeusExTaco/harbor)" >> pipeline-summary.md
-          echo "- [Docker Hub](https://hub.docker.com/r/dextaco/harbor)" >> pipeline-summary.md
-          echo "- [GitHub Packages](https://github.com/DeusExTaco/harbor/pkgs/container/harbor)" >> pipeline-summary.md
-          echo "- [Issues](https://github.com/DeusExTaco/harbor/issues)" >> pipeline-summary.md
 
           cat pipeline-summary.md
 
       - name: Upload pipeline summary
         uses: actions/upload-artifact@v4
         with:
-          name: pipeline-summary-${{ github.run_id }}
+          name: pipeline-summary-${{ github.run_number }}-${{ github.run_attempt }}
           path: pipeline-summary.md
           retention-days: 30
 
@@ -252,8 +246,8 @@ jobs:
             comment += '| Check | Status |\n';
             comment += '|-------|--------|\n';
             comment += `| 🔍 Code Quality | ${codeQuality === 'success' ? '✅ Passed' : '❌ Failed'} |\n`;
-            comment += `| 🔒 Static Security | ${staticSecurity === 'success' ? '✅ Passed' : staticSecurity === 'skipped' ? '⏭️ Skipped' : '❌ Failed'} |\n`;
-            comment += `| 📦 Dependency Security | ${dependencySecurity === 'success' ? '✅ Passed' : dependencySecurity === 'skipped' ? '⏭️ Skipped' : '❌ Failed'} |\n`;
+            comment += `| 🔒 Static Security | ${staticSecurity === 'success' ? '✅ Passed' : staticSecurity === 'skipped' ? '⭐️ Skipped' : '❌ Failed'} |\n`;
+            comment += `| 📦 Dependency Security | ${dependencySecurity === 'success' ? '✅ Passed' : dependencySecurity === 'skipped' ? '⭐️ Skipped' : '❌ Failed'} |\n`;
             comment += `| 🧪 Test Suite | ${testSuite === 'success' ? '✅ Passed' : '❌ Failed'} |\n\n`;
 
             if (codeQuality === 'success' && testSuite === 'success') {
