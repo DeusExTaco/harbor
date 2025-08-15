@@ -22,6 +22,7 @@ import pytest
 class TestHarborImports:
     """Test that Harbor modules can be imported correctly."""
 
+    @pytest.mark.unit
     def test_app_module_exists(self) -> None:
         """Test that the app module can be imported."""
         import app
@@ -29,6 +30,7 @@ class TestHarborImports:
         assert app is not None
         assert hasattr(app, "__name__")
 
+    @pytest.mark.unit
     def test_app_main_module_imports(self) -> None:
         """Test that app.main module imports without errors."""
         import app.main
@@ -37,6 +39,7 @@ class TestHarborImports:
         assert hasattr(app.main, "main")
         assert callable(app.main.main)
 
+    @pytest.mark.unit
     def test_main_function_callable(self) -> None:
         """Test that the main function can be called."""
         from app.main import main
@@ -47,14 +50,24 @@ class TestHarborImports:
 
         # Verify the function was called and printed expected output
         mock_print.assert_called()
-        calls = [call.args[0] for call in mock_print.call_args_list]
-        assert any("Harbor Container Updater" in call for call in calls)
-        assert any("M0 Milestone" in call for call in calls)
+
+        # Safely extract call arguments
+        calls = []
+        for call in mock_print.call_args_list:
+            if call.args:
+                # Convert to string to handle any type safely
+                calls.append(str(call.args[0]))
+
+        # Check for expected content in the printed output
+        all_output = " ".join(calls)
+        assert "Harbor Container Updater" in all_output
+        assert "M0 Milestone" in all_output
 
 
 class TestProjectStructure:
     """Test that the project structure is set up correctly."""
 
+    @pytest.mark.unit
     def test_project_root_exists(self) -> None:
         """Test that we can find the project root."""
         # Navigate up from tests/unit to find project root
@@ -67,6 +80,7 @@ class TestProjectStructure:
         assert (project_root / "app").exists()
         assert (project_root / "tests").exists()
 
+    @pytest.mark.unit
     def test_app_directory_structure(self) -> None:
         """Test that the app directory has the expected structure."""
         project_root = Path(__file__).parent.parent.parent
@@ -76,6 +90,7 @@ class TestProjectStructure:
         assert (app_dir / "__init__.py").exists()
         assert (app_dir / "main.py").exists()
 
+    @pytest.mark.unit
     def test_tests_directory_structure(self) -> None:
         """Test that the tests directory has the expected structure."""
         project_root = Path(__file__).parent.parent.parent
@@ -92,6 +107,7 @@ class TestProjectStructure:
 class TestPythonEnvironment:
     """Test that the Python environment is set up correctly."""
 
+    @pytest.mark.unit
     def test_python_version(self) -> None:
         """Test that we're running on a supported Python version."""
         version_info = sys.version_info
@@ -100,6 +116,7 @@ class TestPythonEnvironment:
         assert version_info.major == 3
         assert version_info.minor >= 11
 
+    @pytest.mark.unit
     def test_required_modules_available(self) -> None:
         """Test that required modules are available for import."""
         # Test core dependencies
@@ -123,6 +140,7 @@ class TestPythonEnvironment:
 class TestMockingCapabilities:
     """Test that mocking works correctly for future tests."""
 
+    @pytest.mark.unit
     def test_mock_creation(self) -> None:
         """Test that we can create mocks."""
         mock_obj = Mock()
@@ -132,12 +150,14 @@ class TestMockingCapabilities:
         mock_obj.test_method.return_value = "test_value"
         assert mock_obj.test_method() == "test_value"
 
+    @pytest.mark.unit
     def test_patch_decorator(self) -> None:
         """Test that patch decorator works."""
         with patch("builtins.print") as mock_print:
             print("test message")
             mock_print.assert_called_once_with("test message")
 
+    @pytest.mark.unit
     @patch("builtins.print")
     def test_patch_as_decorator(self, mock_print: Mock) -> None:
         """Test that patch works as a decorator."""
@@ -153,6 +173,7 @@ class TestPytestMarkers:
         """Test that unit marker works."""
         assert True
 
+    @pytest.mark.unit
     def test_parametrize_works(self) -> None:
         """Test that parametrization works."""
         test_cases = [
@@ -164,6 +185,7 @@ class TestPytestMarkers:
         for text, expected_length in test_cases:
             assert len(text) == expected_length
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "input_value,expected",
         [
@@ -185,21 +207,25 @@ class TestPytestMarkers:
 class TestFutureComponents:
     """Placeholder tests for components that will be implemented."""
 
+    @pytest.mark.unit
     def test_config_module_placeholder(self) -> None:
         """Placeholder for configuration module tests."""
         # TODO: M0 - Implement when app.config module is created
         assert True, "Config module tests will be implemented in M0"
 
+    @pytest.mark.unit
     def test_database_module_placeholder(self) -> None:
         """Placeholder for database module tests."""
         # TODO: M0 - Implement when app.db module is created
         assert True, "Database module tests will be implemented in M0"
 
+    @pytest.mark.unit
     def test_api_module_placeholder(self) -> None:
         """Placeholder for API module tests."""
         # TODO: M0 - Implement when app.api module is created
         assert True, "API module tests will be implemented in M0"
 
+    @pytest.mark.unit
     def test_services_module_placeholder(self) -> None:
         """Placeholder for services module tests."""
         # TODO: M1 - Implement when app.services module is created

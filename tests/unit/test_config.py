@@ -4,12 +4,13 @@ Basic unit test to verify testing infrastructure works
 """
 
 import os
+import sys
 
 import pytest
 
 
 @pytest.mark.unit
-def test_environment_configuration():
+def test_environment_configuration() -> None:
     """Test basic environment configuration"""
     # This is a basic test to verify pytest is working
     assert os.getenv("HARBOR_MODE", "homelab") in [
@@ -20,10 +21,8 @@ def test_environment_configuration():
 
 
 @pytest.mark.unit
-def test_python_version():
+def test_python_version() -> None:
     """Test Python version compatibility"""
-    import sys
-
     version = sys.version_info
     # Harbor requires Python 3.11+
     assert version.major == 3
@@ -31,7 +30,7 @@ def test_python_version():
 
 
 @pytest.mark.unit
-def test_basic_imports():
+def test_basic_imports() -> None:
     """Test that basic Python libraries can be imported"""
     # Test core dependencies that should always be available
     import json

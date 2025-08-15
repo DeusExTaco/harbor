@@ -109,27 +109,28 @@ jobs:
       - name: Run unit tests
         run: |
           if [ -d "tests/unit" ]; then
-            pytest tests/unit/ -v --cov=app --cov-report=xml --cov-report=term-missing
+            echo "🧪 Running existing unit tests..."
+            pytest tests/unit/ -v --cov=app --cov-report=xml --cov-report=term-missing --tb=short
           else
             echo "ℹ️  No unit tests found - creating placeholder test"
             mkdir -p tests/unit
             cat > tests/unit/test_placeholder.py << 'EOF'
-          """Placeholder test for M0 development phase."""
+            """Placeholder test for M0 development phase."""
 
-          def test_placeholder():
-              """Placeholder test that always passes."""
-              assert True
+            def test_placeholder():
+                """Placeholder test that always passes."""
+                assert True
 
-          def test_imports():
-              """Test that basic imports work."""
-              try:
-                  import app
-                  print("✅ Harbor app module imports successfully")
-              except ImportError:
-                  print("ℹ️  Harbor app module not yet implemented")
-                  # This is expected during M0
-                  pass
-          EOF
+            def test_imports():
+                """Test that basic imports work."""
+                try:
+                    import app
+                    print("✅ Harbor app module imports successfully")
+                except ImportError:
+                    print("ℹ️  Harbor app module not yet implemented")
+                    # This is expected during M0
+                    pass
+            EOF
             pytest tests/unit/ -v
           fi
         env:

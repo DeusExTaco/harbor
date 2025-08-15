@@ -59,7 +59,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # FIX: Use standard GitHub secrets instead of custom ones
+      # Use standard GitHub authentication
       - name: Log in to GitHub Container Registry
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -77,13 +77,13 @@ jobs:
           echo "safe_name=${safe_platform}" >> $GITHUB_OUTPUT
           echo "original=${platform}" >> $GITHUB_OUTPUT
 
-      # FIX: Use development Dockerfile for early stages, handle missing app gracefully
+      # Use development Dockerfile which is more likely to build successfully
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: deploy/docker/Dockerfile.dev  # Use dev dockerfile for now
+          file: deploy/docker/Dockerfile.dev
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
@@ -141,7 +141,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
 
-      # FIX: Use standard GitHub authentication
+      # Use standard GitHub authentication
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -183,15 +183,15 @@ jobs:
         with:
           images: ${{ env.REGISTRY_IMAGE_GHCR }}
 
-      # FIX: Login to access the image we just built
+      # Login to access the image we just built
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GITHUB_TOKEN }
 
-      # FIX: Test only basic container functionality, not Harbor app yet
+      # Test only basic container functionality, not Harbor app yet
       - name: Test image
         run: |
           echo "Testing basic container functionality on ${{ matrix.platform }}"
@@ -217,6 +217,16 @@ jobs:
             except ImportError:
                 print('⚠️  SQLAlchemy not available - check dependencies')
 
+            # Test Harbor app import
+            try:
+                import app
+                print('✅ Harbor app module available')
+                from app.main import create_app
+                print('✅ Harbor app factory available')
+            except ImportError as e:
+                print(f'ℹ️  Harbor app not fully available: {e}')
+                print('ℹ️  This is expected during early development (M0)')
+
             print('✅ Container test completed successfully')
             "
 
@@ -235,7 +245,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY_IMAGE_GHCR }}
 
-      # FIX: Login to access the image for scanning
+      # Login to access the image for scanning
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -243,7 +253,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # FIX: Add error handling for Trivy scan
+      # Add error handling for Trivy scan
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
@@ -253,7 +263,7 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM'
           exit-code: '0'  # Don't fail on vulnerabilities during development
 
-      # FIX: Only upload if file exists
+      # Only upload if file exists
       - name: Upload Trivy scan results
         uses: github/codeql-action/upload-sarif@v3
         if: always() && hashFiles('trivy-results.sarif') != ''

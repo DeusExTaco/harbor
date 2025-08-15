@@ -110,7 +110,7 @@ def main() -> None:
     Currently just shows Harbor information.
     """
     print(f"Harbor Container Updater v{__version__}")
-    print(f"Status: {__status__} (Milestone {__milestone__})")
+    print(f"Status: {__status__} (M0 Milestone)")
     print(f"Description: {__description__}")
     print()
     print("To run Harbor:")

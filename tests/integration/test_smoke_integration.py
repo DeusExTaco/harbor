@@ -16,7 +16,7 @@ Purpose:
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -24,6 +24,7 @@ import pytest
 class TestEnvironmentSetup:
     """Test that the integration test environment is properly configured."""
 
+    @pytest.mark.integration
     def test_test_environment_variables(self) -> None:
         """Test that test environment variables can be set and read."""
         # Test setting and reading environment variables
@@ -36,6 +37,7 @@ class TestEnvironmentSetup:
         # Clean up
         del os.environ[test_var]
 
+    @pytest.mark.integration
     def test_temporary_directory_creation(self) -> None:
         """Test that we can create temporary directories for testing."""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -49,6 +51,7 @@ class TestEnvironmentSetup:
             assert test_file.exists()
             assert test_file.read_text() == "test content"
 
+    @pytest.mark.integration
     def test_database_url_environment(self) -> None:
         """Test database URL configuration for testing."""
         # Test that we can set a test database URL
@@ -61,36 +64,45 @@ class TestEnvironmentSetup:
         # Restore original if it existed
         if original_db_url:
             os.environ["DATABASE_URL"] = original_db_url
-        else:
+        elif "DATABASE_URL" in os.environ:
             del os.environ["DATABASE_URL"]
 
 
 class TestApplicationBootstrap:
     """Test application bootstrapping for integration tests."""
 
+    @pytest.mark.integration
     def test_app_import_in_integration_context(self) -> None:
         """Test that app modules can be imported in integration context."""
         # This simulates importing the app in an integration test context
+        import app
         import app.main
 
         assert app is not None
         assert app.main is not None
 
-    @patch("app.main.print")
-    def test_main_function_integration(self, mock_print: Mock) -> None:
+    @pytest.mark.integration
+    def test_main_function_integration(self) -> None:
         """Test main function in integration context."""
         from app.main import main
 
-        # Call main function
-        main()
+        # Capture stdout to avoid printing during tests
+        with patch("builtins.print") as mock_print:
+            main()
 
         # Verify it was called
         mock_print.assert_called()
 
-        # Check that expected output was printed
-        calls = [call.args[0] for call in mock_print.call_args_list]
-        assert any("Harbor Container Updater" in call for call in calls)
+        # Check that expected output was printed - safe extraction
+        calls = []
+        for call in mock_print.call_args_list:
+            if call.args:
+                calls.append(str(call.args[0]))
 
+        all_output = " ".join(calls)
+        assert "Harbor Container Updater" in all_output
+
+    @pytest.mark.integration
     def test_app_configuration_placeholder(self) -> None:
         """Placeholder for app configuration testing."""
         # TODO: M0 - Implement when configuration system is ready
@@ -101,6 +113,7 @@ class TestApplicationBootstrap:
 class TestFileSystemIntegration:
     """Test file system operations needed for integration tests."""
 
+    @pytest.mark.integration
     def test_data_directory_creation(self) -> None:
         """Test creating data directories for testing."""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -110,6 +123,7 @@ class TestFileSystemIntegration:
             assert data_dir.exists()
             assert data_dir.is_dir()
 
+    @pytest.mark.integration
     def test_logs_directory_creation(self) -> None:
         """Test creating logs directories for testing."""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -119,6 +133,7 @@ class TestFileSystemIntegration:
             assert logs_dir.exists()
             assert logs_dir.is_dir()
 
+    @pytest.mark.integration
     def test_config_file_handling(self) -> None:
         """Test configuration file handling."""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -144,6 +159,7 @@ logging:
 class TestDatabaseIntegrationPrep:
     """Prepare for database integration testing."""
 
+    @pytest.mark.integration
     def test_sqlite_connection_preparation(self) -> None:
         """Test SQLite connection preparation for integration tests."""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -154,6 +170,7 @@ class TestDatabaseIntegrationPrep:
             assert db_url.startswith("sqlite:///")
             assert str(db_path) in db_url
 
+    @pytest.mark.integration
     def test_database_environment_isolation(self) -> None:
         """Test database environment isolation for tests."""
         # Test that we can isolate database for testing
@@ -162,6 +179,7 @@ class TestDatabaseIntegrationPrep:
         with patch.dict(os.environ, {"DATABASE_URL": test_db_url}):
             assert os.getenv("DATABASE_URL") == test_db_url
 
+    @pytest.mark.integration
     def test_database_cleanup_preparation(self) -> None:
         """Test database cleanup preparation."""
         # Test that we can prepare for database cleanup
@@ -180,6 +198,7 @@ class TestDatabaseIntegrationPrep:
 class TestHTTPClientPreparation:
     """Prepare for HTTP client testing."""
 
+    @pytest.mark.integration
     def test_http_client_imports(self) -> None:
         """Test that HTTP client dependencies are available."""
         try:
@@ -193,6 +212,7 @@ class TestHTTPClientPreparation:
         # TODO: M0 - Implement actual HTTP client testing when FastAPI is set up
         assert isinstance(http_client_available, bool)
 
+    @pytest.mark.integration
     def test_test_client_preparation(self) -> None:
         """Prepare for FastAPI test client usage."""
         # TODO: M0 - Implement when FastAPI app is created
