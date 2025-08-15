@@ -1,4 +1,4 @@
-name: Docker Multi-Architecture Build
+name: Docker Build & Publish
 
 on:
   workflow_call:
@@ -30,12 +30,58 @@ env:
 
 jobs:
   # =============================================================================
-  # Build for AMD64 only (simplified for M0)
+  # Build Configuration
+  # =============================================================================
+  build-config:
+    name: Build Configuration
+    runs-on: ubuntu-latest
+
+    outputs:
+      docker-tags: ${{ steps.config.outputs.docker-tags }}
+      ghcr-tags: ${{ steps.config.outputs.ghcr-tags }}
+      dockerfile: ${{ steps.config.outputs.dockerfile }}
+      should-build: ${{ steps.config.outputs.should-build }}
+
+    steps:
+      - name: Determine build configuration
+        id: config
+        run: |
+          # Determine if we should build
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "should-build=false" >> $GITHUB_OUTPUT
+            echo "🔄 Pull request - skipping build"
+            exit 0
+          else
+            echo "should-build=true" >> $GITHUB_OUTPUT
+          fi
+
+          # Determine tags based on branch
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "docker-tags=dextaco/harbor:latest" >> $GITHUB_OUTPUT
+            echo "ghcr-tags=ghcr.io/deusextaco/harbor:latest" >> $GITHUB_OUTPUT
+            echo "dockerfile=deploy/docker/Dockerfile" >> $GITHUB_OUTPUT
+            echo "📦 Main branch - using production Dockerfile with 'latest' tag"
+          elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
+            echo "docker-tags=dextaco/harbor:develop" >> $GITHUB_OUTPUT
+            echo "ghcr-tags=ghcr.io/deusextaco/harbor:develop" >> $GITHUB_OUTPUT
+            echo "dockerfile=deploy/docker/Dockerfile.dev" >> $GITHUB_OUTPUT
+            echo "📦 Develop branch - using dev Dockerfile with 'develop' tag"
+          else
+            # For other branches, use latest tag with dev dockerfile
+            echo "docker-tags=dextaco/harbor:latest" >> $GITHUB_OUTPUT
+            echo "ghcr-tags=ghcr.io/deusextaco/harbor:latest" >> $GITHUB_OUTPUT
+            echo "dockerfile=deploy/docker/Dockerfile.dev" >> $GITHUB_OUTPUT
+            echo "📦 Feature branch - using dev Dockerfile with 'latest' tag"
+          fi
+
+  # =============================================================================
+  # Docker Build & Push
   # =============================================================================
   build:
-    name: Build Images
+    name: Build & Push Images
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
+    needs: [build-config]
+    if: needs.build-config.outputs.should-build == 'true'
 
     steps:
       - name: Checkout code
@@ -43,30 +89,17 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            network=host
 
-      - name: Determine tags based on branch
-        id: tags
-        run: |
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            echo "DOCKER_TAGS=dextaco/harbor:latest" >> $GITHUB_ENV
-            echo "GHCR_TAGS=ghcr.io/deusextaco/harbor:latest" >> $GITHUB_ENV
-          elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
-            echo "DOCKER_TAGS=dextaco/harbor:develop" >> $GITHUB_ENV
-            echo "GHCR_TAGS=ghcr.io/deusextaco/harbor:develop" >> $GITHUB_ENV
-          else
-            # For feature branches, tag as latest
-            echo "DOCKER_TAGS=dextaco/harbor:latest" >> $GITHUB_ENV
-            echo "GHCR_TAGS=ghcr.io/deusextaco/harbor:latest" >> $GITHUB_ENV
-          fi
-
-      # Login to Docker Hub
+      # Login to registries
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Login to GitHub Container Registry
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -74,108 +107,135 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Select appropriate Dockerfile
-      - name: Select Dockerfile
-        id: dockerfile
-        run: |
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            echo "dockerfile=deploy/docker/Dockerfile" >> $GITHUB_OUTPUT
-            echo "Using production Dockerfile for main branch"
-          else
-            echo "dockerfile=deploy/docker/Dockerfile.dev" >> $GITHUB_OUTPUT
-            echo "Using development Dockerfile"
-          fi
-
-      # Build and push to Docker Hub (AMD64 only for M0)
+      # Build and push to Docker Hub
       - name: Build and push to Docker Hub
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ${{ steps.dockerfile.outputs.dockerfile }}
+          file: ${{ needs.build-config.outputs.dockerfile }}
           platforms: linux/amd64
           push: true
-          tags: ${{ env.DOCKER_TAGS }}
+          tags: ${{ needs.build-config.outputs.docker-tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.title=Harbor Container Updater
+            org.opencontainers.image.description=Automated Docker container updates
+            org.opencontainers.image.source=https://github.com/DeusExTaco/harbor
+            org.opencontainers.image.version=0.1.0
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
 
-      # Build and push to GHCR (AMD64 only for M0)
+      # Build and push to GHCR
       - name: Build and push to GHCR
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ${{ steps.dockerfile.outputs.dockerfile }}
+          file: ${{ needs.build-config.outputs.dockerfile }}
           platforms: linux/amd64
           push: true
-          tags: ${{ env.GHCR_TAGS }}
+          tags: ${{ needs.build-config.outputs.ghcr-tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      # Test the images work
-      - name: Test Docker Hub image
-        run: |
-          echo "🧪 Testing Docker Hub image..."
-          docker run --rm ${{ env.DOCKER_TAGS }} python -c "
-          import sys
-          print('✅ Docker Hub image works!')
-          print(f'Python version: {sys.version}')
-          try:
-              import app
-              print(f'Harbor version: {app.__version__}')
-              print(f'Milestone: {app.__milestone__}')
-          except ImportError as e:
-              print(f'❌ Harbor app import failed: {e}')
-          "
-
-      - name: Test GHCR image
-        run: |
-          echo "🧪 Testing GHCR image..."
-          docker run --rm ${{ env.GHCR_TAGS }} python -c "
-          import sys
-          print('✅ GHCR image works!')
-          print(f'Python version: {sys.version}')
-          try:
-              import app
-              print(f'Harbor version: {app.__version__}')
-              print(f'Milestone: {app.__milestone__}')
-          except ImportError as e:
-              print(f'❌ Harbor app import failed: {e}')
-          "
+          labels: |
+            org.opencontainers.image.title=Harbor Container Updater
+            org.opencontainers.image.description=Automated Docker container updates
+            org.opencontainers.image.source=https://github.com/DeusExTaco/harbor
+            org.opencontainers.image.version=0.1.0
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
 
   # =============================================================================
-  # Test Images (Simplified for M0)
+  # Image Testing
   # =============================================================================
   test:
     name: Test Images
     runs-on: ubuntu-latest
-    needs: [build]
-    if: github.event_name != 'pull_request'
+    needs: [build-config, build]
+    if: needs.build-config.outputs.should-build == 'true'
 
     steps:
-      - name: Determine test tags
+      # Test Docker Hub image
+      - name: Test Docker Hub image
         run: |
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            echo "DOCKER_TAG=dextaco/harbor:latest" >> $GITHUB_ENV
-          elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
-            echo "DOCKER_TAG=dextaco/harbor:develop" >> $GITHUB_ENV
-          else
-            echo "DOCKER_TAG=dextaco/harbor:latest" >> $GITHUB_ENV
-          fi
+          echo "🧪 Testing Docker Hub image..."
+          docker run --rm ${{ needs.build-config.outputs.docker-tags }} python -c "
+          import sys
+          print('✅ Docker Hub image works!')
+          print(f'Python version: {sys.version}')
 
-      - name: Test image functionality
+          try:
+              import app
+              print(f'✅ Harbor version: {app.__version__}')
+              print(f'✅ Milestone: {app.__milestone__}')
+              print(f'✅ Status: {app.__status__}')
+          except ImportError as e:
+              print(f'❌ Harbor app import failed: {e}')
+              exit(1)
+
+          try:
+              import fastapi
+              print('✅ FastAPI available')
+          except ImportError:
+              print('⚠️  FastAPI not available')
+          "
+
+      # Test GHCR image
+      - name: Test GHCR image
         run: |
-          echo "🧪 Testing image functionality..."
-          # Start container
-          docker run -d --name harbor-test -p 8080:8080 ${{ env.DOCKER_TAG }}
+          echo "🧪 Testing GHCR image..."
+          docker run --rm ${{ needs.build-config.outputs.ghcr-tags }} python -c "
+          import sys
+          print('✅ GHCR image works!')
+          print(f'Python version: {sys.version}')
+
+          try:
+              import app
+              print(f'✅ Harbor version: {app.__version__}')
+              print(f'✅ Milestone: {app.__milestone__}')
+              print(f'✅ Status: {app.__status__}')
+          except ImportError as e:
+              print(f'❌ Harbor app import failed: {e}')
+              exit(1)
+          "
+
+      # Test FastAPI functionality
+      - name: Test FastAPI endpoints
+        run: |
+          echo "🧪 Testing FastAPI application..."
+
+          # Start container in background
+          docker run -d --name harbor-test -p 8080:8080 ${{ needs.build-config.outputs.docker-tags }}
 
           # Wait for startup
+          echo "⏳ Waiting for application startup..."
           sleep 15
 
-          # Test endpoints
-          echo "Testing /healthz..."
-          curl -f http://localhost:8080/healthz
+          # Test health endpoint
+          echo "🔍 Testing /healthz endpoint..."
+          if curl -f -s http://localhost:8080/healthz; then
+            echo "✅ Health endpoint working"
+          else
+            echo "❌ Health endpoint failed"
+            docker logs harbor-test
+            exit 1
+          fi
 
-          echo "Testing /version..."
-          curl -f http://localhost:8080/version
+          # Test version endpoint
+          echo "🔍 Testing /version endpoint..."
+          if curl -f -s http://localhost:8080/version | jq '.version'; then
+            echo "✅ Version endpoint working"
+          else
+            echo "❌ Version endpoint failed"
+          fi
+
+          # Test root endpoint
+          echo "🔍 Testing / endpoint..."
+          if curl -f -s http://localhost:8080/ | jq '.name'; then
+            echo "✅ Root endpoint working"
+          else
+            echo "❌ Root endpoint failed"
+          fi
 
           # Cleanup
           docker stop harbor-test
@@ -187,7 +247,7 @@ jobs:
   summary:
     name: Build Summary
     runs-on: ubuntu-latest
-    needs: [build, test]
+    needs: [build-config, build, test]
     if: always()
 
     outputs:
@@ -195,30 +255,52 @@ jobs:
       build-successful: ${{ steps.output.outputs.build-successful }}
 
     steps:
-      - name: Set outputs and summary
+      - name: Set outputs and generate summary
         id: output
         run: |
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            TAGS="dextaco/harbor:latest,ghcr.io/deusextaco/harbor:latest"
-          elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
-            TAGS="dextaco/harbor:develop,ghcr.io/deusextaco/harbor:develop"
+          # Determine if build was successful
+          if [[ "${{ needs.build.result }}" == "success" && "${{ needs.test.result }}" == "success" ]]; then
+            echo "build-successful=true" >> $GITHUB_OUTPUT
+            BUILD_STATUS="✅ SUCCESS"
           else
-            TAGS="dextaco/harbor:latest,ghcr.io/deusextaco/harbor:latest"
+            echo "build-successful=false" >> $GITHUB_OUTPUT
+            BUILD_STATUS="❌ FAILED"
           fi
 
-          echo "image-tags=${TAGS}" >> $GITHUB_OUTPUT
-          echo "build-successful=true" >> $GITHUB_OUTPUT
+          # Set image tags output
+          if [ "${{ needs.build-config.outputs.should-build }}" = "true" ]; then
+            DOCKER_TAG="${{ needs.build-config.outputs.docker-tags }}"
+            GHCR_TAG="${{ needs.build-config.outputs.ghcr-tags }}"
+            echo "image-tags=${DOCKER_TAG},${GHCR_TAG}" >> $GITHUB_OUTPUT
+          else
+            echo "image-tags=" >> $GITHUB_OUTPUT
+          fi
 
-          echo "🎉 Harbor Production Build Complete!"
-          echo "=================================="
+          # Generate summary
+          echo "🎉 Harbor Docker Build Summary"
+          echo "============================"
           echo ""
-          echo "📦 Published Images:"
-          echo "• Docker Hub: $(echo $TAGS | cut -d',' -f1)"
-          echo "• GHCR: $(echo $TAGS | cut -d',' -f2)"
+          echo "📋 Build Status: ${BUILD_STATUS}"
+          echo "🔧 Branch: ${{ github.ref_name }}"
+          echo "📦 Dockerfile: ${{ needs.build-config.outputs.dockerfile }}"
+          echo "🏗️  Platform: linux/amd64"
           echo ""
-          echo "🏗️  Architecture: linux/amd64"
-          echo "📋 Branch: ${{ github.ref_name }}"
-          echo "🔧 Status: Production Ready"
+
+          if [ "${{ needs.build-config.outputs.should-build }}" = "true" ]; then
+            echo "📦 Published Images:"
+            echo "• Docker Hub: ${{ needs.build-config.outputs.docker-tags }}"
+            echo "• GHCR: ${{ needs.build-config.outputs.ghcr-tags }}"
+            echo ""
+            echo "🔗 Repository Links:"
+            echo "• https://hub.docker.com/r/dextaco/harbor"
+            echo "• https://github.com/DeusExTaco/harbor/pkgs/container/harbor"
+            echo ""
+            echo "📥 Quick Start:"
+            echo "docker run -d -p 8080:8080 ${{ needs.build-config.outputs.docker-tags }}"
+          else
+            echo "ℹ️  Build skipped for pull request"
+          fi
+
           echo ""
-          echo "📥 Quick Start:"
-          echo "docker run -d -p 8080:8080 $(echo $TAGS | cut -d',' -f1)"
+          echo "🎯 M0 Milestone Status: Foundation Complete"
+          echo "📋 Next: M1 Container Discovery & Registry Integration"

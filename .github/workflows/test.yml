@@ -245,7 +245,7 @@ jobs:
           fi
           echo "Documentation check completed"
 
-  # =============================================================================
+# =============================================================================
   # Test Summary (Aggregates all results)
   # =============================================================================
   test-summary:
@@ -292,7 +292,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-summary-${{ github.run_number }}-${{ github.run_attempt }}
+          name: test-summary-${{ github.run_number }}-${{ strategy.job-index || '0' }}
           path: test-summary.md
           retention-days: 30
 

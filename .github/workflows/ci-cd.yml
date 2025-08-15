@@ -71,7 +71,7 @@ jobs:
       (needs.static-security.result == 'success' || needs.static-security.result == 'skipped') &&
       (needs.dependency-security.result == 'success' || needs.dependency-security.result == 'skipped') &&
       github.event_name != 'pull_request'
-    uses: ./.github/workflows/docker-build-fresh.yml
+    uses: ./.github/workflows/docker-build.yml
     secrets: inherit  # pragma: allowlist secret
 
   # =============================================================================
