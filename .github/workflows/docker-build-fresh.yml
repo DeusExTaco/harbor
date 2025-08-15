@@ -4,7 +4,7 @@ on:
   workflow_call:
     outputs:
       image-tags:
-        description: "Published image tags"
+        description: "Published image all tags"
         value: ${{ jobs.build-summary.outputs.image-tags }}
       build-successful:
         description: "Whether build was successful"
