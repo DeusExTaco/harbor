@@ -1,0 +1,22 @@
+# Basic Home Lab Example
+# Simple Harbor deployment for home labs
+version: '3.8'
+
+services:
+  harbor:
+    image: ghcr.io/deusextaco/harbor:latest
+    container_name: harbor
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - harbor_data:/app/data
+    environment:
+      - HARBOR_MODE=homelab
+    labels:
+      - "harbor.exclude=true"
+
+volumes:
+  harbor_data:
+    driver: local

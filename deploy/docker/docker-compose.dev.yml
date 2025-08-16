@@ -1,46 +1,328 @@
 # Harbor Container Updater - Development Docker Compose
-# For local development with hot reload and debugging
+# Located: deploy/docker/docker-compose.dev.yml
+# Complete development environment with hot reload, debugging, and services
 
+version: '3.8'
 
 services:
+  # =============================================================================
+  # Harbor Development Application
+  # =============================================================================
   harbor-dev:
     build:
-      context: ../..
+      context: ../..  # Build from project root
       dockerfile: deploy/docker/Dockerfile.dev
+      args:
+        - DEV_MODE=true
     container_name: harbor-dev
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8080:8080"    # Main application
+      - "5678:5678"    # Debug port (debugpy)
     volumes:
-      # Mount source code for hot reload
+      # Source code mounting for hot reload (from project root)
       - ../..:/app
-      # Mount Docker socket for container discovery
+      - /app/__pycache__        # Exclude pycache
+      - /app/.pytest_cache      # Exclude pytest cache
+
+      # Docker socket for container discovery (read-only)
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      # Persistent data
+
+      # Persistent development data
       - harbor_dev_data:/app/data
       - harbor_dev_logs:/app/logs
+      - harbor_dev_config:/app/config
+
+      # Development tools cache
+      - dev_pip_cache:/home/harbor/.cache/pip
+      - dev_mypy_cache:/home/harbor/.mypy_cache
     environment:
+      # Core Harbor configuration
       - HARBOR_MODE=development
       - LOG_LEVEL=DEBUG
-      - DATABASE_URL=sqlite:///data/harbor_dev.db
-      - ENABLE_AUTO_DISCOVERY=true
       - DEV_RELOAD=true
+
+      # Database configuration
+      - DATABASE_URL=sqlite:///data/harbor_dev.db
+
+      # Development features
+      - ENABLE_AUTO_DISCOVERY=true
+      - ENABLE_METRICS=true
+      - ENABLE_SIMPLE_MODE=true
+      - SHOW_GETTING_STARTED=true
+
+      # Debug configuration
+      - PYTHONPATH=/app
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+
+      # Development-specific settings
+      - MAX_CONCURRENT_UPDATES=1
+      - DEFAULT_CHECK_INTERVAL_SECONDS=300  # 5 minutes for testing
+      - REGISTRY_CACHE_TTL=300              # 5 minutes for testing
+
+      # Security (relaxed for development)
+      - REQUIRE_HTTPS=false
+      - SESSION_TIMEOUT_HOURS=168           # 1 week
+      - API_RATE_LIMIT_PER_HOUR=10000      # High limit for dev
+
+      # Performance (optimized for development)
+      - DATABASE_POOL_SIZE=3
+      - HARBOR_MAX_WORKERS=2
     labels:
-      - "harbor.exclude=true"  # Don't update Harbor itself
+      - "harbor.exclude=true"               # Don't update Harbor itself
       - "com.harbor.environment=development"
+      - "com.harbor.service=main-app"
+    networks:
+      - harbor-dev-network
+    depends_on:
+      - redis-dev
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      test: ["CMD", "python", "scripts/health_check.py"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 60s
 
+  # =============================================================================
+  # Redis (for caching and sessions in development)
+  # =============================================================================
+  redis-dev:
+    image: redis:7-alpine
+    container_name: harbor-redis-dev
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_dev_data:/data
+      - ../../config/redis-dev.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    environment:
+      - REDIS_PASSWORD=dev_password_123  # pragma: allowlist secret
+    labels:
+      - "harbor.exclude=true"
+      - "com.harbor.environment=development"
+      - "com.harbor.service=cache"
+    networks:
+      - harbor-dev-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # =============================================================================
+  # PostgreSQL (optional - for testing enterprise features)
+  # =============================================================================
+  postgres-dev:
+    image: postgres:15-alpine
+    container_name: harbor-postgres-dev
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+      - ../../scripts/init-postgres-dev.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      - POSTGRES_DB=harbor_dev
+      - POSTGRES_USER=harbor_dev
+      - POSTGRES_PASSWORD=dev_password_123  # pragma: allowlist secret
+      - POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256
+    labels:
+      - "harbor.exclude=true"
+      - "com.harbor.environment=development"
+      - "com.harbor.service=database"
+    networks:
+      - harbor-dev-network
+    profiles:
+      - postgres  # Enable with: docker-compose --profile postgres up
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U harbor_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # =============================================================================
+  # Test Container Registry (for testing registry features)
+  # =============================================================================
+  registry-dev:
+    image: registry:2
+    container_name: harbor-registry-dev
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - registry_dev_data:/var/lib/registry
+      - ../../config/registry-dev.yml:/etc/docker/registry/config.yml
+    environment:
+      - REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY=/var/lib/registry
+      - REGISTRY_HTTP_ADDR=0.0.0.0:5000
+    labels:
+      - "harbor.exclude=true"
+      - "com.harbor.environment=development"
+      - "com.harbor.service=registry"
+    networks:
+      - harbor-dev-network
+    profiles:
+      - registry  # Enable with: docker-compose --profile registry up
+
+  # =============================================================================
+  # Prometheus (for metrics development)
+  # =============================================================================
+  prometheus-dev:
+    image: prom/prometheus:latest
+    container_name: harbor-prometheus-dev
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../../config/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_dev_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=7d'
+      - '--web.enable-lifecycle'
+    labels:
+      - "harbor.exclude=true"
+      - "com.harbor.environment=development"
+      - "com.harbor.service=monitoring"
+    networks:
+      - harbor-dev-network
+    profiles:
+      - monitoring  # Enable with: docker-compose --profile monitoring up
+
+  # =============================================================================
+  # Grafana (for metrics visualization)
+  # =============================================================================
+  grafana-dev:
+    image: grafana/grafana:latest
+    container_name: harbor-grafana-dev
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_dev_data:/var/lib/grafana
+      - ../../config/monitoring/grafana:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=dev_password_123  # pragma: allowlist secret
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel
+    labels:
+      - "harbor.exclude=true"
+      - "com.harbor.environment=development"
+      - "com.harbor.service=visualization"
+    networks:
+      - harbor-dev-network
+    depends_on:
+      - prometheus-dev
+    profiles:
+      - monitoring  # Enable with: docker-compose --profile monitoring up
+
+  # =============================================================================
+  # MailHog (for email testing in development)
+  # =============================================================================
+  mailhog-dev:
+    image: mailhog/mailhog:latest
+    container_name: harbor-mailhog-dev
+    restart: unless-stopped
+    ports:
+      - "1025:1025"  # SMTP server
+      - "8025:8025"  # Web interface
+    labels:
+      - "harbor.exclude=true"
+      - "com.harbor.environment=development"
+      - "com.harbor.service=mail"
+    networks:
+      - harbor-dev-network
+    profiles:
+      - mail  # Enable with: docker-compose --profile mail up
+
+  # =============================================================================
+  # Test Containers (for testing Harbor functionality)
+  # =============================================================================
+  test-nginx:
+    image: nginx:alpine
+    container_name: harbor-test-nginx
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    volumes:
+      - ../../tests/fixtures/nginx.conf:/etc/nginx/nginx.conf:ro
+    labels:
+      - "harbor.enable=true"
+      - "harbor.policy.auto-update=true"
+      - "harbor.policy.check-interval=60"  # 1 minute for testing
+      - "com.harbor.test-container=true"
+    networks:
+      - harbor-dev-network
+    profiles:
+      - test-containers
+
+  test-redis:
+    image: redis:alpine
+    container_name: harbor-test-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    labels:
+      - "harbor.enable=true"
+      - "harbor.policy.auto-update=false"  # Test excluded container
+      - "com.harbor.test-container=true"
+    networks:
+      - harbor-dev-network
+    profiles:
+      - test-containers
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  harbor-dev-network:
+    driver: bridge
+    name: harbor-dev-network
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# =============================================================================
+# Volumes
+# =============================================================================
 volumes:
+  # Harbor application data
   harbor_dev_data:
     driver: local
+    name: harbor_dev_data
   harbor_dev_logs:
     driver: local
+    name: harbor_dev_logs
+  harbor_dev_config:
+    driver: local
+    name: harbor_dev_config
 
-networks:
-  default:
-    name: harbor-dev-network
+  # Development cache volumes
+  dev_pip_cache:
+    driver: local
+    name: harbor_dev_pip_cache
+  dev_mypy_cache:
+    driver: local
+    name: harbor_dev_mypy_cache
+
+  # Service data volumes
+  redis_dev_data:
+    driver: local
+    name: harbor_redis_dev_data
+  postgres_dev_data:
+    driver: local
+    name: harbor_postgres_dev_data
+  registry_dev_data:
+    driver: local
+    name: harbor_registry_dev_data
+  prometheus_dev_data:
+    driver: local
+    name: harbor_prometheus_dev_data
+  grafana_dev_data:
+    driver: local
+    name: harbor_grafana_dev_data

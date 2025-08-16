@@ -1,0 +1,73 @@
+# Harbor Development Configuration
+# Located: config/development.yaml
+# Development profile configuration as per harbor-architecture.md
+
+deployment:
+  profile: development
+  auto_setup: true
+  show_welcome: true
+
+database:
+  url: "sqlite:///data/harbor_dev.db"
+  pool_size: 3
+  backup_enabled: true
+  backup_retention_days: 7
+
+security:
+  require_https: false
+  session_lifetime_hours: 168  # 1 week for convenience
+  password_min_length: 6
+  rate_limiting_enabled: false
+
+scheduler:
+  timezone: "auto"
+  max_workers: 2
+  default_check_interval: 300    # 5 minutes for testing
+  default_update_time: "03:00"
+
+features:
+  simple_mode: true
+  getting_started: true
+  auto_discovery: true
+  telemetry: false  # Privacy first
+
+resources:
+  memory_limit_mb: 256
+  log_retention_days: 7
+  cache_size_mb: 50
+
+updates:
+  max_concurrent: 1             # Conservative for development
+  delay_between_updates: 5
+  default_cleanup_keep: 2
+  health_check_timeout: 60
+
+# Development-specific settings
+development:
+  enable_debug: true
+  debug_port: 5678
+  hot_reload: true
+  test_mode: true
+  mock_registry_calls: false    # Use real registries for testing
+
+# Redis configuration for development
+redis:
+  host: "redis-dev"
+  port: 6379
+  password: "dev_password_123"  # pragma: allowlist secret
+  db: 0
+
+# PostgreSQL configuration (when using postgres profile)
+postgres:
+  host: "postgres-dev"
+  port: 5432
+  database: "harbor_dev"
+  username: "harbor_dev"
+  password: "dev_password_123"  # pragma: allowlist secret
+
+# Monitoring configuration
+monitoring:
+  prometheus_enabled: true
+  prometheus_port: 9090
+  grafana_enabled: true
+  grafana_port: 3000

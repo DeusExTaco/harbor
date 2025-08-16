@@ -1,286 +1,396 @@
 # Harbor Container Updater - Development Makefile
-# Provides common development tasks for the Harbor project
+# Following Harbor Project Structure from foundational documents
 
-.PHONY: help install dev test test-cov lint format clean docker-build docker-run
+.PHONY: help dev-setup dev-up dev-down dev-logs dev-shell dev-test dev-clean dev-reset
 
-# Default target
+# =============================================================================
+# Configuration following project structure
+# =============================================================================
+DOCKER_COMPOSE_DEV = deploy/docker/docker-compose.dev.yml
+DEV_SCRIPTS_DIR = scripts/dev
+CONFIG_DIR = config
+
+# =============================================================================
+# Help
+# =============================================================================
 help: ## Show this help message
-	@echo 'Harbor Container Updater - Development Commands'
-	@echo ''
-	@echo 'Usage: make [target]'
-	@echo ''
-	@echo 'Setup Commands:'
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@echo "🛳️ Harbor Development Commands"
+	@echo "=============================="
+	@echo "Following Harbor Project Structure from foundational documents"
+	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "🌐 Development URLs:"
+	@echo "   Harbor:          http://localhost:8080"
+	@echo "   Prometheus:      http://localhost:9090"
+	@echo "   Grafana:         http://localhost:3000 (admin/dev_password_123)"
+	@echo "   MailHog:         http://localhost:8025"
+	@echo "   Test Registry:   http://localhost:5000"
 
 # =============================================================================
-# Installation and Setup
+# Development Setup
 # =============================================================================
-
-install: ## Install production dependencies only
-	pip install --upgrade pip
-	pip install -e .
-
-dev: ## Install development dependencies and setup dev environment
-	pip install --upgrade pip
-	pip install -e ".[dev]"
-	pre-commit install
-
-dev-full: ## Complete development setup including all optional dependencies
-	pip install --upgrade pip
-	pip install -e ".[dev,prod,test]"
-	pre-commit install
-	playwright install  # Install browser binaries for e2e tests
+dev-setup: ## Set up development environment following project structure
+	@echo "🛳️ Setting up Harbor development environment..."
+	@echo "Following Harbor Project Structure from foundational documents"
+	@chmod +x $(DEV_SCRIPTS_DIR)/setup.sh $(DEV_SCRIPTS_DIR)/down.sh $(DEV_SCRIPTS_DIR)/logs.sh
+	@$(DEV_SCRIPTS_DIR)/setup.sh
+	@echo "✅ Development setup complete!"
 
 # =============================================================================
-# Code Quality and Testing
+# Docker Compose Commands (using proper paths)
 # =============================================================================
+dev-up: ## Start basic development environment
+	@echo "🚀 Starting Harbor development environment..."
+	@cd deploy/docker && docker-compose -f docker-compose.dev.yml up -d
+	@echo "✅ Development environment started!"
+	@echo "🌐 Harbor available at: http://localhost:8080"
 
-test: ## Run unit and integration tests
-	pytest tests/ -v
+dev-up-full: ## Start full development environment with all services
+	@echo "🚀 Starting full Harbor development environment..."
+	@cd deploy/docker && docker-compose -f docker-compose.dev.yml --profile postgres --profile monitoring --profile test-containers --profile mail --profile registry up -d
+	@echo "✅ Full development environment started!"
+	@$(MAKE) dev-status
 
-test-unit: ## Run only unit tests
-	pytest tests/unit/ -v
+dev-up-postgres: ## Start development environment with PostgreSQL
+	@echo "🚀 Starting Harbor development with PostgreSQL..."
+	@cd deploy/docker && docker-compose -f docker-compose.dev.yml --profile postgres up -d
+	@echo "✅ Development environment with PostgreSQL started!"
 
-test-integration: ## Run only integration tests
-	pytest tests/integration/ -v
+dev-up-monitoring: ## Start development environment with monitoring stack
+	@echo "🚀 Starting Harbor development with monitoring..."
+	@cd deploy/docker && docker-compose -f docker-compose.dev.yml --profile monitoring up -d
+	@echo "✅ Development environment with monitoring started!"
 
-test-e2e: ## Run end-to-end tests
-	pytest tests/e2e/ -v
+dev-down: ## Stop development environment
+	@echo "🛑 Stopping Harbor development environment..."
+	@cd deploy/docker && docker-compose -f docker-compose.dev.yml --profile postgres --profile monitoring --profile test-containers --profile mail --profile registry down
 
-test-cov: ## Run tests with coverage report
-	pytest --cov=app --cov-report=html --cov-report=term-missing
-
-test-cov-xml: ## Run tests with XML coverage report (for CI)
-	pytest --cov=app --cov-report=xml
-
-test-performance: ## Run performance tests
-	pytest tests/performance/ -v
-
-test-security: ## Run security tests
-	pytest tests/security/ -v
-
-test-all: ## Run all test suites
-	pytest tests/ -v --cov=app --cov-report=html
-
-# =============================================================================
-# Code Quality Tools
-# =============================================================================
-
-lint: ## Run all linting checks
-	@echo "Running ruff linter..."
-	ruff check app/ tests/
-	@echo "Running mypy type checker..."
-	mypy app/ tests/
-	@echo "Linting complete!"
-
-lint-fix: ## Run linting with automatic fixes
-	@echo "Running ruff with automatic fixes..."
-	ruff check --fix app/ tests/
-	@echo "Running ruff formatter..."
-	ruff format app/ tests/
-	@echo "Linting and formatting complete!"
-
-format: ## Format code with ruff
-	@echo "Formatting code with ruff..."
-	ruff format app/ tests/
-	@echo "Organizing imports with ruff..."
-	ruff check --fix app/ tests/
-	@echo "Code formatting complete!"
-
-typecheck: ## Run type checking with mypy
-	mypy app/ tests/
-
-pre-commit: ## Run all pre-commit hooks
-	pre-commit run --all-files
+dev-restart: ## Restart development environment
+	@$(MAKE) dev-down
+	@$(MAKE) dev-up
 
 # =============================================================================
-# Development Server
+# Development Tools
 # =============================================================================
+dev-logs: ## View Harbor application logs (add SERVICE=name for specific service)
+	@if [ -z "$(SERVICE)" ]; then \
+		$(DEV_SCRIPTS_DIR)/logs.sh harbor -f; \
+	else \
+		$(DEV_SCRIPTS_DIR)/logs.sh $(SERVICE) -f; \
+	fi
 
-run: ## Run Harbor development server
-	python app/main.py
+dev-logs-all: ## View all service logs
+	@$(DEV_SCRIPTS_DIR)/logs.sh all -f
 
-run-reload: ## Run development server with auto-reload
-	uvicorn app.main:create_app --factory --reload --host 0.0.0.0 --port 8080
-
-run-debug: ## Run development server with debug logging
-	HARBOR_MODE=development LOG_LEVEL=DEBUG python app/main.py
-
-# =============================================================================
-# Database Operations
-# =============================================================================
-
-db-upgrade: ## Run database migrations (upgrade to latest)
-	alembic upgrade head
-
-db-downgrade: ## Downgrade database by one revision
-	alembic downgrade -1
-
-db-revision: ## Create new database revision
-	@read -p "Enter migration message: " msg; \
-	alembic revision --autogenerate -m "$$msg"
-
-db-reset: ## Reset database (WARNING: destroys all data)
-	@echo "WARNING: This will destroy all database data!"
-	@read -p "Are you sure? (y/N): " confirm && [ "$$confirm" = "y" ]
-	rm -f data/harbor.db*
-	alembic upgrade head
-
-# =============================================================================
-# Docker Development
-# =============================================================================
-
-
-docker-build: ## Build development Docker image
-	docker build -t harbor:dev -f deploy/docker/Dockerfile.dev .
-
-docker-build-prod: ## Build production Docker image
-	docker build -t harbor:latest -f deploy/docker/Dockerfile .
-
-
-docker-build-multi: ## Build multi-architecture images locally
-	./scripts/build.sh
-
-docker-run: ## Run Harbor in Docker container
-	docker run -d --name harbor-dev \
-		-p 8080:8080 \
-		-v /var/run/docker.sock:/var/run/docker.sock:ro \
-		-v $$(pwd)/data:/app/data \
-		harbor:dev
-
-docker-run-prod: ## Run production Harbor container
-	docker run -d --name harbor-prod \
-		-p 8080:8080 \
-		-v /var/run/docker.sock:/var/run/docker.sock:ro \
-		-v harbor-data:/app/data \
-		harbor:latest
-
-docker-stop: ## Stop and remove development container
-	docker stop harbor-dev || true
-	docker rm harbor-dev || true
-
-docker-stop-prod: ## Stop and remove production container
-	docker stop harbor-prod || true
-	docker rm harbor-prod || true
-
-docker-logs: ## Show Docker container logs
-	docker logs -f harbor-dev
-
-docker-logs-prod: ## Show production container logs
-	docker logs -f harbor-prod
-
-docker-shell: ## Open shell in running container
+dev-shell: ## Get shell access to Harbor development container
+	@echo "🐚 Connecting to Harbor development container..."
 	docker exec -it harbor-dev /bin/bash
 
-docker-shell-prod: ## Open shell in production container
-	docker exec -it harbor-prod /bin/bash
+dev-shell-root: ## Get root shell access to Harbor development container
+	@echo "🐚 Connecting to Harbor development container as root..."
+	docker exec -it --user root harbor-dev /bin/bash
 
-docker-health: ## Check Docker container health status
-	@echo "Checking Harbor container health..."
-	@docker inspect harbor-dev --format='{{.State.Health.Status}}' 2>/dev/null || echo "Container not running"
-	@docker exec harbor-dev curl -f http://localhost:8080/healthz 2>/dev/null && echo "✅ Health check passed" || echo "❌ Health check failed"
-
-docker-health-prod: ## Check production container health
-	@echo "Checking Harbor production container health..."
-	@docker inspect harbor-prod --format='{{.State.Health.Status}}' 2>/dev/null || echo "Container not running"
-	@docker exec harbor-prod curl -f http://localhost:8080/healthz 2>/dev/null && echo "✅ Health check passed" || echo "❌ Health check failed"
-
-docker-compose-dev: ## Start development environment with Docker Compose
-	docker-compose -f deploy/docker/docker-compose.dev.yml up -d
-
-docker-compose-logs: ## Show Docker Compose logs
-	docker-compose -f deploy/docker/docker-compose.dev.yml logs -f
-
-docker-compose-down: ## Stop Docker Compose environment
-	docker-compose -f deploy/docker/docker-compose.dev.yml down
+dev-status: ## Show status of all development services
+	@echo "📊 Harbor Development Environment Status"
+	@echo "========================================"
+	@echo ""
+	@echo "🐳 Container Status:"
+	@docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep harbor- || echo "No Harbor containers running"
+	@echo ""
+	@echo "🌐 Service URLs:"
+	@echo "   Harbor:          http://localhost:8080"
+	@echo "   Prometheus:      http://localhost:9090"
+	@echo "   Grafana:         http://localhost:3000"
+	@echo "   MailHog:         http://localhost:8025"
+	@echo "   Test Registry:   http://localhost:5000"
+	@echo "   Test Nginx:      http://localhost:8081"
+	@echo ""
 
 # =============================================================================
-# Project Maintenance
+# Testing
 # =============================================================================
+dev-test: ## Run tests in development environment
+	@echo "🧪 Running Harbor tests in development environment..."
+	docker exec -it harbor-dev python -m pytest tests/ -v
 
-clean: ## Clean build artifacts and temporary files
-	@echo "Cleaning build artifacts..."
-	rm -rf build/
-	rm -rf dist/
-	rm -rf *.egg-info/
-	rm -rf .coverage
-	rm -rf htmlcov/
-	rm -rf .pytest_cache/
-	rm -rf .mypy_cache/
-	rm -rf .ruff_cache/
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name "*.pyc" -delete
-	@echo "Clean complete!"
+dev-test-unit: ## Run unit tests only
+	@echo "🧪 Running unit tests..."
+	docker exec -it harbor-dev python -m pytest tests/unit/ -v
 
-docker-clean: ## Clean Docker images and containers
+dev-test-integration: ## Run integration tests only
+	@echo "🧪 Running integration tests..."
+	docker exec -it harbor-dev python -m pytest tests/integration/ -v
+
+dev-test-coverage: ## Run tests with coverage report
+	@echo "🧪 Running tests with coverage..."
+	docker exec -it harbor-dev python -m pytest tests/ --cov=app --cov-report=html --cov-report=term-missing
+
+# =============================================================================
+# Code Quality
+# =============================================================================
+dev-lint: ## Run linting in development environment
+	@echo "🔍 Running linting..."
+	docker exec -it harbor-dev ruff check app/ tests/
+
+dev-format: ## Format code in development environment
+	@echo "🎨 Formatting code..."
+	docker exec -it harbor-dev ruff format app/ tests/
+	docker exec -it harbor-dev black app/ tests/
+
+dev-typecheck: ## Run type checking
+	@echo "🔍 Running type checking..."
+	docker exec -it harbor-dev mypy app/
+
+dev-quality: ## Run all code quality checks
+	@$(MAKE) dev-lint
+	@$(MAKE) dev-typecheck
+	@echo "✅ Code quality checks complete!"
+
+# =============================================================================
+# Database Management
+# =============================================================================
+dev-db-shell: ## Access SQLite database shell
+	@echo "💾 Connecting to SQLite database..."
+	docker exec -it harbor-dev sqlite3 /app/data/harbor_dev.db
+
+dev-db-reset: ## Reset development database
+	@echo "🗑️ Resetting development database..."
+	docker exec -it harbor-dev rm -f /app/data/harbor_dev.db
+	@echo "✅ Development database reset!"
+
+dev-db-migrate: ## Run database migrations
+	@echo "📊 Running database migrations..."
+	docker exec -it harbor-dev python -m alembic upgrade head
+
+dev-db-backup: ## Backup development database
+	@echo "💾 Backing up development database..."
+	docker exec -it harbor-dev cp /app/data/harbor_dev.db /app/data/harbor_dev_backup_$(shell date +%Y%m%d_%H%M%S).db
+	@echo "✅ Database backed up!"
+
+# =============================================================================
+# Configuration Management (following project structure)
+# =============================================================================
+dev-config-edit: ## Edit development configuration
+	@echo "⚙️ Opening development configuration..."
+	@${EDITOR:-nano} $(CONFIG_DIR)/development.yaml
+
+dev-config-validate: ## Validate configuration files
+	@echo "🔍 Validating configuration files..."
+	@if command -v yamllint >/dev/null 2>&1; then \
+		yamllint $(CONFIG_DIR)/; \
+	else \
+		echo "💡 Install yamllint for configuration validation: pip install yamllint"; \
+	fi
+
+dev-config-show: ## Show current development configuration
+	@echo "📋 Current development configuration:"
+	@cat $(CONFIG_DIR)/development.yaml
+
+# =============================================================================
+# Project Structure Utilities
+# =============================================================================
+dev-structure: ## Show project structure (following foundational documents)
+	@echo "📁 Harbor Project Structure (from foundational documents):"
+	@echo ""
+	@tree -I '__pycache__|*.pyc|node_modules|.git|.pytest_cache' -L 3 . || \
+	find . -type d -not -path './.git/*' -not -path './__pycache__/*' -not -path './node_modules/*' | head -20
+
+dev-examples: ## Show available example configurations
+	@echo "📚 Available example configurations:"
+	@echo ""
+	@find examples/ -name "*.yml" -o -name "*.yaml" | sort || echo "No examples found"
+
+# =============================================================================
+# Development Utilities
+# =============================================================================
+dev-ps: ## Show development containers
+	@docker ps --filter "name=harbor-" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+dev-volumes: ## Show development volumes
+	@echo "📦 Harbor Development Volumes:"
+	@docker volume ls | grep harbor-dev
+
+dev-network: ## Show development network info
+	@echo "🌐 Harbor Development Network:"
+	@docker network inspect harbor-dev-network --format '{{json .IPAM.Config}}' | jq '.[0]' 2>/dev/null || echo "Network not found"
+
+dev-clean: ## Clean up development containers and images
+	@echo "🧹 Cleaning up development environment..."
+	@cd deploy/docker && docker-compose -f docker-compose.dev.yml down --rmi local
 	docker system prune -f
-	docker image prune -f
+	@echo "✅ Development cleanup complete!"
 
-deps-update: ## Update all dependencies to latest versions
-	pip install --upgrade pip
-	pip install --upgrade -e ".[dev,prod,test]"
+dev-reset: ## Reset entire development environment (removes all data)
+	@echo "⚠️  This will delete ALL development data!"
+	@read -p "Are you sure? [y/N] " -n 1 -r; \
+	if [[ $REPLY =~ ^[Yy]$ ]]; then \
+		echo ""; \
+		echo "🗑️ Resetting development environment..."; \
+		cd deploy/docker && docker-compose -f docker-compose.dev.yml down -v; \
+		docker system prune -f; \
+		echo "✅ Development environment reset!"; \
+		echo "💡 Run 'make dev-setup && make dev-up' to start fresh"; \
+	else \
+		echo ""; \
+		echo "❌ Reset cancelled"; \
+	fi
 
-deps-check: ## Check for dependency vulnerabilities
-	pip-audit
+# =============================================================================
+# Build and Development
+# =============================================================================
+dev-build: ## Rebuild development Docker image
+	@echo "🏗️ Building Harbor development image..."
+	@cd deploy/docker && docker-compose -f docker-compose.dev.yml build harbor-dev
+	@echo "✅ Development image built!"
+
+dev-build-no-cache: ## Rebuild development image without cache
+	@echo "🏗️ Building Harbor development image (no cache)..."
+	@cd deploy/docker && docker-compose -f docker-compose.dev.yml build --no-cache harbor-dev
+	@echo "✅ Development image built!"
+
+dev-pull: ## Pull latest images for development services
+	@echo "📥 Pulling latest development service images..."
+	@cd deploy/docker && docker-compose -f docker-compose.dev.yml pull
+	@echo "✅ Images updated!"
+
+# =============================================================================
+# Debugging
+# =============================================================================
+dev-debug: ## Start Harbor with debugger enabled
+	@echo "🐛 Starting Harbor with debugger on port 5678..."
+	@cd deploy/docker && docker-compose -f docker-compose.dev.yml up -d
+	@echo "🔗 Connect your IDE debugger to localhost:5678"
+	@echo "💡 PyCharm: Run > Attach to Process > localhost:5678"
+	@echo "💡 VS Code: Use 'Python: Remote Attach' configuration"
+
+dev-htop: ## Show resource usage in development container
+	@echo "📊 Resource usage in Harbor development container:"
+	docker exec -it harbor-dev htop
+
+dev-inspect: ## Inspect Harbor development container
+	@echo "🔍 Harbor development container details:"
+	docker inspect harbor-dev | jq '.[0] | {Name: .Name, State: .State, Config: .Config.Env}' 2>/dev/null || echo "Container not found"
+
+# =============================================================================
+# Docker Registry Testing
+# =============================================================================
+dev-registry-up: ## Start test registry for testing registry features
+	@echo "🐳 Starting test registry..."
+	@cd deploy/docker && docker-compose -f docker-compose.dev.yml --profile registry up -d registry-dev
+	@echo "✅ Test registry started at http://localhost:5000"
+
+dev-registry-push: ## Push test image to local registry
+	@echo "📤 Pushing test image to local registry..."
+	docker tag nginx:alpine localhost:5000/test/nginx:latest
+	docker push localhost:5000/test/nginx:latest
+	@echo "✅ Test image pushed to registry"
+
+dev-registry-list: ## List images in test registry
+	@echo "📋 Images in test registry:"
+	@curl -s http://localhost:5000/v2/_catalog | jq '.repositories' 2>/dev/null || echo "Registry not accessible"
+
+# =============================================================================
+# Performance Monitoring
+# =============================================================================
+dev-metrics: ## View Harbor metrics
+	@echo "📊 Harbor development metrics:"
+	@curl -s http://localhost:8080/metrics | head -20 2>/dev/null || echo "Metrics not available"
+
+dev-health: ## Check Harbor health
+	@echo "❤️ Harbor health status:"
+	@curl -s http://localhost:8080/healthz | jq '.' 2>/dev/null || echo "Health endpoint not available"
+
+dev-ready: ## Check Harbor readiness
+	@echo "✅ Harbor readiness status:"
+	@curl -s http://localhost:8080/readyz | jq '.' 2>/dev/null || echo "Readiness endpoint not available"
 
 # =============================================================================
 # Documentation
 # =============================================================================
+dev-docs: ## Generate and serve development documentation
+	@echo "📚 Generating development documentation..."
+	@if command -v mkdocs >/dev/null 2>&1; then \
+		mkdocs serve -a 0.0.0.0:8000; \
+	else \
+		echo "💡 Install mkdocs: pip install mkdocs mkdocs-material"; \
+	fi
 
-docs-serve: ## Serve documentation locally (when implemented)
-	@echo "Documentation server not yet implemented (M4 milestone)"
-
-docs-build: ## Build documentation (when implemented)
-	@echo "Documentation build not yet implemented (M4 milestone)"
-
-# =============================================================================
-# Release Management
-# =============================================================================
-
-version: ## Show current version
-	@python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"
-
-version-bump-patch: ## Bump patch version (0.1.0 -> 0.1.1)
-	@echo "Version bump not yet implemented - manual edit pyproject.toml"
-
-version-bump-minor: ## Bump minor version (0.1.0 -> 0.2.0)
-	@echo "Version bump not yet implemented - manual edit pyproject.toml"
+dev-docs-open: ## Open development documentation in browser
+	@echo "📖 Opening development documentation..."
+	@open docs/development.md || xdg-open docs/development.md || echo "Please open docs/development.md manually"
 
 # =============================================================================
-# Utility Commands
+# Example Management (following project structure)
 # =============================================================================
+dev-example-basic: ## Start basic home lab example
+	@echo "🏠 Starting basic home lab example..."
+	@cd examples/home-lab/basic && docker-compose up -d
 
-env-info: ## Show development environment information
-	@echo "Harbor Development Environment"
-	@echo "=============================="
-	@echo "Python version: $$(python --version)"
-	@echo "Pip version: $$(pip --version)"
-	@echo "Virtual environment: $$VIRTUAL_ENV"
-	@echo "Harbor package: $$(pip show harbor | grep Location || echo 'Not installed')"
+dev-example-monitoring: ## Start home lab with monitoring example
+	@echo "📊 Starting home lab with monitoring example..."
+	@cd examples/home-lab/with-monitoring && docker-compose up -d
+
+dev-example-down: ## Stop all example deployments
+	@echo "🛑 Stopping example deployments..."
+	@cd examples/home-lab/basic && docker-compose down 2>/dev/null || true
+	@cd examples/home-lab/with-monitoring && docker-compose down 2>/dev/null || true
+
+# =============================================================================
+# Quick Development Workflows
+# =============================================================================
+dev-quick: dev-setup dev-up ## Quick setup and start development environment
+
+dev-full: dev-setup dev-up-full ## Setup and start full development environment with all services
+
+dev-test-all: dev-test dev-lint dev-typecheck ## Run all tests and quality checks
+
+dev-fresh: dev-down dev-build dev-up ## Fresh rebuild and restart
+
+# =============================================================================
+# Help for specific workflows
+# =============================================================================
+dev-help-structure: ## Show help for project structure commands
+	@echo "📁 Harbor Project Structure Commands"
+	@echo "===================================="
 	@echo ""
-	@echo "Installed development tools:"
-	@echo "- pytest: $$(pytest --version | head -1 || echo 'Not installed')"
-	@echo "- ruff: $$(ruff --version || echo 'Not installed')"
-	@echo "- mypy: $$(mypy --version || echo 'Not installed')"
+	@echo "Following Harbor Project Structure from foundational documents:"
+	@echo ""
+	@echo "📂 Directory Structure:"
+	@echo "   deploy/docker/           - Docker deployment files"
+	@echo "   config/                  - Configuration files"
+	@echo "   examples/                - Example deployments"
+	@echo "   scripts/dev/            - Development scripts"
+	@echo "   tests/fixtures/         - Test data"
+	@echo ""
+	@echo "🔧 Structure Commands:"
+	@echo "   make dev-structure      - Show current project structure"
+	@echo "   make dev-examples       - List available examples"
+	@echo "   make dev-config-show    - Show development configuration"
 
-check: ## Run all quality checks (lint, type check, test)
-	@echo "Running complete quality check..."
-	make lint
-	make test
-	@echo "✅ All quality checks passed!"
+dev-help-examples: ## Show help for using examples
+	@echo "📚 Harbor Example Configurations"
+	@echo "================================="
+	@echo ""
+	@echo "Available examples following project structure:"
+	@echo ""
+	@echo "🏠 Home Lab Examples:"
+	@echo "   examples/home-lab/basic/                 - Simple Harbor deployment"
+	@echo "   examples/home-lab/with-monitoring/       - Harbor with Prometheus/Grafana"
+	@echo "   examples/home-lab/with-traefik/         - Harbor with Traefik proxy"
+	@echo "   examples/home-lab/raspberry-pi/         - Raspberry Pi optimized"
+	@echo ""
+	@echo "🏢 Enterprise Examples:"
+	@echo "   examples/enterprise/high-availability/   - HA deployment"
+	@echo "   examples/enterprise/monitoring/          - Full monitoring stack"
+	@echo "   examples/enterprise/security/            - Security hardened"
+	@echo ""
+	@echo "🚀 Quick Start Commands:"
+	@echo "   make dev-example-basic      - Start basic example"
+	@echo "   make dev-example-monitoring - Start monitoring example"
+	@echo "   make dev-example-down       - Stop all examples"
 
 # =============================================================================
-# Git Helpers
+# Default target
 # =============================================================================
-
-git-setup: ## Setup git hooks and configuration
-	pre-commit install
-	git config core.autocrlf false
-	git config pull.rebase true
-
-# For macOS users specifically
-setup-mac: ## macOS-specific setup
-	@echo "Setting up Harbor development on macOS..."
-	brew install --quiet docker docker-compose || echo "Docker already installed"
-	make dev
-	@echo "✅ macOS setup complete!"
+.DEFAULT_GOAL := help
