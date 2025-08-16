@@ -41,7 +41,7 @@ jobs:
       ghcr-tags: ${{ steps.config.outputs.ghcr-tags }}
       dockerfile: ${{ steps.config.outputs.dockerfile }}
       should-build: ${{ steps.config.outputs.should-build }}
-      image-labels: ${{ steps.config.outputs.image-labels }}
+      harbor-version: ${{ steps.config.outputs.harbor-version }}
 
     steps:
       - name: Checkout code
@@ -61,23 +61,8 @@ jobs:
 
           # Extract version from pyproject.toml for proper tagging
           VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "harbor-version=$VERSION" >> $GITHUB_OUTPUT
           echo "📦 Detected version: $VERSION"
-
-          # Generate consistent labels for all builds
-          cat << EOF >> $GITHUB_OUTPUT
-          image-labels<<LABELS_EOF
-          org.opencontainers.image.title=Harbor Container Updater
-          org.opencontainers.image.description=Automated Docker container updates for home labs and enterprises
-          org.opencontainers.image.source=https://github.com/DeusExTaco/harbor
-          org.opencontainers.image.documentation=https://harbor-docs.dev
-          org.opencontainers.image.licenses=MIT
-          org.opencontainers.image.vendor=Harbor Team
-          org.opencontainers.image.version=$VERSION
-          org.opencontainers.image.revision=${{ github.sha }}
-          org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-          harbor.milestone=M0
-          harbor.deployment-profile=homelab
-          LABELS_EOF
 
           # Determine tags and dockerfile based on ref with explicit validation
           if [ "${{ github.ref_type }}" = "tag" ]; then
@@ -123,9 +108,6 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: |
-            network=host
 
       # Login to registries with error handling
       - name: Log in to Docker Hub
@@ -153,7 +135,26 @@ jobs:
           fi
           echo "✅ Using Dockerfile: $DOCKERFILE"
 
-      # Build and push to Docker Hub (with error handling)
+      # Extract metadata using docker/metadata-action (no here-docs)
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.REGISTRY_IMAGE_DOCKERHUB }}
+            ${{ env.REGISTRY_IMAGE_GHCR }}
+          labels: |
+            org.opencontainers.image.title=Harbor Container Updater
+            org.opencontainers.image.description=Automated Docker container updates for home labs and enterprises
+            org.opencontainers.image.source=https://github.com/DeusExTaco/harbor
+            org.opencontainers.image.documentation=https://harbor-docs.dev
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.vendor=Harbor Team
+            org.opencontainers.image.version=${{ needs.build-config.outputs.harbor-version }}
+            harbor.milestone=M0
+            harbor.deployment-profile=homelab
+
+      # Build and push to Docker Hub
       - name: Build and push to Docker Hub
         if: env.REGISTRY_IMAGE_DOCKERHUB != ''
         uses: docker/build-push-action@v5
@@ -163,16 +164,11 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ needs.build-config.outputs.docker-tags }}
-          labels: ${{ needs.build-config.outputs.image-labels }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # Add build args for better traceability
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
-            BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-            VCS_REF=${{ github.sha }}
 
-      # Build and push to GHCR (with error handling)
+      # Build and push to GHCR
       - name: Build and push to GHCR
         uses: docker/build-push-action@v5
         with:
@@ -181,14 +177,9 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ needs.build-config.outputs.ghcr-tags }}
-          labels: ${{ needs.build-config.outputs.image-labels }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # Add build args for better traceability
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
-            BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-            VCS_REF=${{ github.sha }}
 
       # Output build information for debugging
       - name: Build information
@@ -199,6 +190,7 @@ jobs:
           echo "🐳 Dockerfile: ${{ needs.build-config.outputs.dockerfile }}"
           echo "🌐 Platform: linux/amd64"
           echo "📝 Git SHA: ${{ github.sha }}"
+          echo "🏷️ Version: ${{ needs.build-config.outputs.harbor-version }}"
 
   # =============================================================================
   # Image Testing & Validation
@@ -245,7 +237,6 @@ jobs:
               exit(1)
           except AttributeError as e:
               print(f'⚠️ Harbor app missing attributes: {e}')
-              # Don't fail for missing attributes during M0
 
           try:
               import fastapi
@@ -327,7 +318,7 @@ jobs:
             echo "image-tags=" >> $GITHUB_OUTPUT
           fi
 
-          # Generate summary
+          # Generate summary using simple echo statements
           echo "🎉 Harbor Docker Build Summary"
           echo "============================"
           echo ""
@@ -336,6 +327,7 @@ jobs:
           echo "📦 Dockerfile: ${{ needs.build-config.outputs.dockerfile }}"
           echo "🗏️ Platform: linux/amd64"
           echo "📝 Commit: ${{ github.sha }}"
+          echo "🏷️ Version: ${{ needs.build-config.outputs.harbor-version }}"
           echo ""
 
           if [ "${{ needs.build-config.outputs.should-build }}" = "true" ]; then
