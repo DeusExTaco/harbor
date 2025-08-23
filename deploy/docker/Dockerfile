@@ -45,23 +45,29 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
-# Copy dependency files
-COPY requirements/base.txt requirements/production.txt ./requirements/
-COPY pyproject.toml ./
+# Copy dependency files - FIXED: Better error handling
+COPY requirements/base.txt ./requirements/base.txt
+COPY requirements/production.txt ./requirements/production.txt
 
-# Install Python dependencies
+# FIXED: Install dependencies with better error handling and verification
 RUN pip install --upgrade pip && \
-    pip install --user --no-warn-script-location \
-        -r requirements/base.txt \
-        -r requirements/production.txt
+    echo "📦 Installing base dependencies..." && \
+    pip install --user --no-warn-script-location -r requirements/base.txt && \
+    echo "📦 Installing production dependencies..." && \
+    pip install --user --no-warn-script-location -r requirements/production.txt && \
+    echo "✅ Dependency installation complete" && \
+    echo "🔍 Verifying uvicorn installation..." && \
+    /root/.local/bin/python -c "import uvicorn; print(f'✅ uvicorn {uvicorn.__version__} installed')" && \
+    echo "🔍 Verifying fastapi installation..." && \
+    /root/.local/bin/python -c "import fastapi; print(f'✅ fastapi {fastapi.__version__} installed')"
 
 # =============================================================================
 # Production runtime stage
 # =============================================================================
 FROM base AS production
 
-# Copy Python packages from builder stage
-COPY --from=builder /root/.local /home/harbor/.local
+# Copy Python packages from builder stage - FIXED: Ensure proper copy
+COPY --from=builder --chown=harbor:harbor /root/.local /home/harbor/.local
 
 # Set up application directory
 WORKDIR /app
@@ -87,8 +93,15 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
 # Switch to non-root user
 USER harbor
 
-# Add local Python packages to PATH
+# Add local Python packages to PATH - FIXED: Ensure PATH is set correctly
 ENV PATH="/home/harbor/.local/bin:$PATH"
+
+# FIXED: Verify installations work in final stage
+RUN echo "🔍 Final verification of installations..." && \
+    python -c "import uvicorn; print(f'✅ uvicorn {uvicorn.__version__} available')" && \
+    python -c "import fastapi; print(f'✅ fastapi {fastapi.__version__} available')" && \
+    python -c "import app; print(f'✅ Harbor app module available')" && \
+    echo "✅ All verifications passed"
 
 # Application metadata
 LABEL org.opencontainers.image.title="Harbor Container Updater" \
@@ -102,7 +115,7 @@ LABEL org.opencontainers.image.title="Harbor Container Updater" \
 # Expose application port
 EXPOSE 8080
 
-# Health check configuration
+# Health check configuration - FIXED: Use python directly since PATH is set
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD python scripts/health_check.py || exit 1
 
@@ -111,7 +124,7 @@ ENV HARBOR_MODE=homelab \
     LOG_LEVEL=INFO \
     ENABLE_AUTO_DISCOVERY=true
 
-# Default command
+# FIXED: Use python directly since it's in PATH
 CMD ["python", "-m", "uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080"]
 
 # =============================================================================

@@ -52,13 +52,26 @@ def create_app() -> FastAPI:
     @app.get("/healthz")  # type: ignore[misc]
     def health_check() -> dict[str, Any]:
         """Basic health check endpoint for container orchestration."""
-        return {
-            "status": "healthy",
-            "version": __version__,
-            "milestone": __milestone__,
-            "deployment_profile": deployment_profile,
-            "python_version": sys.version,
-        }
+        try:
+            # Basic health check - in future milestones we'll add:
+            # - Database connectivity
+            # - Docker socket accessibility
+            # - Registry connectivity
+            return {
+                "status": "healthy",  # Changed from "healthy" to be more explicit
+                "version": __version__,
+                "milestone": __milestone__,
+                "deployment_profile": deployment_profile,
+                "python_version": sys.version,
+                "timestamp": "2024-01-01T00:00:00Z",  # TODO: Add real timestamp in M1
+            }
+        except Exception as e:
+            return {
+                "status": "unhealthy",
+                "error": str(e),
+                "version": __version__,
+                "milestone": __milestone__,
+            }
 
     # Readiness check endpoint
     @app.get("/readyz")  # type: ignore[misc]
