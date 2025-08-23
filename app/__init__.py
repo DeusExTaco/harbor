@@ -8,7 +8,7 @@ Copyright (c) 2024 Harbor Contributors
 Licensed under the MIT License
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.0-alpha.1"
 __description__ = "Automated Docker container updates for home labs and enterprises"
 __author__ = "Harbor Contributors"
 __license__ = "MIT"
