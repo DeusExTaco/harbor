@@ -1,0 +1,605 @@
+name: Release Automation
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v0.1.0, v1.0.0-rc.1)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        default: false
+        type: boolean
+      milestone:
+        description: 'Harbor milestone (M0, M1, M2, etc.)'
+        required: false
+        default: 'M0'
+        type: string
+
+# Enhanced permissions for release operations
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+  issues: write
+  actions: read
+
+env:
+  REGISTRY_IMAGE_DOCKERHUB: dextaco/harbor
+  REGISTRY_IMAGE_GHCR: ghcr.io/deusextaco/harbor
+
+jobs:
+  # =============================================================================
+  # Release Validation
+  # =============================================================================
+  validate-release:
+    name: Validate Release
+    runs-on: ubuntu-latest
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      version-clean: ${{ steps.version.outputs.version-clean }}
+      milestone: ${{ steps.version.outputs.milestone }}
+      is-prerelease: ${{ steps.version.outputs.is-prerelease }}
+      should-proceed: ${{ steps.validation.outputs.should-proceed }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version information
+        id: version
+        run: |
+          # Determine version from tag or input
+          if [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" =~ ^refs/tags/v ]]; then
+            VERSION="${{ github.ref_name }}"
+            echo "🏷️ Tag-triggered release: $VERSION"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              echo "❌ Invalid version format: $VERSION"
+              echo "Expected format: v1.2.3 or v1.2.3-rc.1"
+              exit 1
+            fi
+            echo "🎯 Manual release: $VERSION"
+          else
+            echo "❌ Release workflow triggered incorrectly"
+            exit 1
+          fi
+
+          # Clean version (without 'v' prefix)
+          VERSION_CLEAN=${VERSION#v}
+
+          # Determine if pre-release
+          if [[ "$VERSION" =~ (alpha|beta|rc|dev) ]] || [ "${{ github.event.inputs.prerelease }}" = "true" ]; then
+            IS_PRERELEASE=true
+            echo "🚧 Pre-release version detected"
+          else
+            IS_PRERELEASE=false
+            echo "🎉 Stable release version"
+          fi
+
+          # Determine milestone from version or input
+          if [ "${{ github.event.inputs.milestone }}" != "" ]; then
+            MILESTONE="${{ github.event.inputs.milestone }}"
+          else
+            # Auto-determine milestone from version
+            case "$VERSION_CLEAN" in
+              0.1.*) MILESTONE="M0" ;;
+              0.2.*) MILESTONE="M1" ;;
+              0.3.*) MILESTONE="M2" ;;
+              0.4.*) MILESTONE="M3" ;;
+              0.5.*) MILESTONE="M4" ;;
+              0.6.*) MILESTONE="M5" ;;
+              1.0.*) MILESTONE="M6" ;;
+              *) MILESTONE="M0" ;;
+            esac
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version-clean=$VERSION_CLEAN" >> $GITHUB_OUTPUT
+          echo "milestone=$MILESTONE" >> $GITHUB_OUTPUT
+          echo "is-prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+
+      - name: Validate project version consistency
+        run: |
+          PROJECT_VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          EXPECTED_VERSION="${{ steps.version.outputs.version-clean }}"
+
+          echo "📦 Project version: $PROJECT_VERSION"
+          echo "🏷️ Release version: $EXPECTED_VERSION"
+
+          if [ "$PROJECT_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "❌ Version mismatch!"
+            echo "Please update pyproject.toml version to match release tag"
+            exit 1
+          fi
+
+          echo "✅ Version consistency validated"
+
+      - name: Validate Harbor app version
+        run: |
+          APP_VERSION=$(grep '__version__ = ' app/__init__.py | sed 's/__version__ = "\(.*\)"/\1/')
+          EXPECTED_VERSION="${{ steps.version.outputs.version-clean }}"
+
+          echo "🚢 Harbor app version: $APP_VERSION"
+          echo "🏷️ Release version: $EXPECTED_VERSION"
+
+          if [ "$APP_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "❌ Harbor app version mismatch!"
+            echo "Please update app/__init__.py version to match release tag"
+            exit 1
+          fi
+
+          echo "✅ Harbor app version validated"
+
+      - name: Check milestone consistency
+        run: |
+          APP_MILESTONE=$(grep '__milestone__ = ' app/__init__.py | sed 's/__milestone__ = "\(.*\)"/\1/')
+          EXPECTED_MILESTONE="${{ steps.version.outputs.milestone }}"
+
+          echo "📋 Harbor app milestone: $APP_MILESTONE"
+          echo "🎯 Release milestone: $EXPECTED_MILESTONE"
+
+          if [ "$APP_MILESTONE" != "$EXPECTED_MILESTONE" ]; then
+            echo "⚠️ Milestone mismatch detected"
+            echo "App milestone: $APP_MILESTONE, Release milestone: $EXPECTED_MILESTONE"
+            echo "This is informational - release will continue"
+          else
+            echo "✅ Milestone consistency validated"
+          fi
+
+      - name: Final validation
+        id: validation
+        run: |
+          echo "🔍 Final release validation:"
+          echo "  Version: ${{ steps.version.outputs.version }}"
+          echo "  Milestone: ${{ steps.version.outputs.milestone }}"
+          echo "  Pre-release: ${{ steps.version.outputs.is-prerelease }}"
+          echo "  Event: ${{ github.event_name }}"
+          echo "  Branch: ${{ github.ref }}"
+          echo ""
+          echo "✅ All validations passed - proceeding with release"
+          echo "should-proceed=true" >> $GITHUB_OUTPUT
+
+  # =============================================================================
+  # Run Full Test Suite Before Release
+  # =============================================================================
+  release-tests:
+    name: Release Test Suite
+    needs: [validate-release]
+    if: needs.validate-release.outputs.should-proceed == 'true'
+    uses: ./.github/workflows/test.yml
+    secrets: inherit  # pragma: allowlist secret
+    with:
+      stage: "full-tests"
+
+  # =============================================================================
+  # Security Scan Before Release
+  # =============================================================================
+  release-security:
+    name: Release Security Scan
+    needs: [validate-release]
+    if: needs.validate-release.outputs.should-proceed == 'true'
+    uses: ./.github/workflows/security.yml
+    secrets: inherit  # pragma: allowlist secret
+    with:
+      scan-type: "all"
+
+  # =============================================================================
+  # Build Release Images
+  # =============================================================================
+  release-build:
+    name: Build Release Images
+    needs: [validate-release, release-tests, release-security]
+    if: |
+      always() &&
+      needs.validate-release.outputs.should-proceed == 'true' &&
+      needs.release-tests.result == 'success' &&
+      (needs.release-security.result == 'success' || needs.release-security.result == 'skipped')
+    runs-on: ubuntu-latest
+
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-tags: ${{ steps.build.outputs.tags }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}  # pragma: allowlist secret
+          password: ${{ secrets.DOCKERHUB_TOKEN }}  # pragma: allowlist secret
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}  # pragma: allowlist secret
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.REGISTRY_IMAGE_DOCKERHUB }}
+            ${{ env.REGISTRY_IMAGE_GHCR }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.validate-release.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.validate-release.outputs.version }}
+            type=semver,pattern={{major}},value=${{ needs.validate-release.outputs.version }},enable={{is_default_branch}}
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=Harbor Container Updater
+            org.opencontainers.image.description=Automated Docker container updates for home labs and enterprises
+            org.opencontainers.image.source=https://github.com/DeusExTaco/harbor
+            org.opencontainers.image.documentation=https://harbor-docs.dev
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.vendor=Harbor Team
+            org.opencontainers.image.version=${{ needs.validate-release.outputs.version-clean }}
+            harbor.milestone=${{ needs.validate-release.outputs.milestone }}
+            harbor.deployment-profile=homelab
+            harbor.release-type=${{ needs.validate-release.outputs.is-prerelease == 'true' && 'prerelease' || 'stable' }}
+
+      - name: Build and push release images
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/amd64  # TODO: M1+ Add multi-arch: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      - name: Output build information
+        run: |
+          echo "🗗️ Release build completed successfully!"
+          echo "📦 Image tags: ${{ steps.meta.outputs.tags }}"
+          echo "🔍 Image digest: ${{ steps.build.outputs.digest }}"
+          echo "🏷️ Version: ${{ needs.validate-release.outputs.version }}"
+          echo "📋 Milestone: ${{ needs.validate-release.outputs.milestone }}"
+
+  # =============================================================================
+  # Container Security Scan of Release Images
+  # =============================================================================
+  release-container-scan:
+    name: Scan Release Images
+    needs: [validate-release, release-build]
+    if: |
+      always() &&
+      needs.validate-release.outputs.should-proceed == 'true' &&
+      needs.release-build.result == 'success'
+    uses: ./.github/workflows/security.yml
+    secrets: inherit  # pragma: allowlist secret
+    with:
+      scan-type: "container"
+      image-tags: ${{ needs.release-build.outputs.image-tags }}
+
+  # =============================================================================
+  # Generate Release Notes
+  # =============================================================================
+  generate-changelog:
+    name: Generate Release Notes
+    needs: [validate-release]
+    if: needs.validate-release.outputs.should-proceed == 'true'
+    runs-on: ubuntu-latest
+
+    outputs:
+      changelog: ${{ steps.changelog.outputs.changelog }}
+      release-notes: ${{ steps.release-notes.outputs.notes }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          MILESTONE="${{ needs.validate-release.outputs.milestone }}"
+
+          # Get the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          echo "📝 Generating changelog for $VERSION"
+          echo "📋 Milestone: $MILESTONE"
+          if [ -n "$PREV_TAG" ]; then
+            echo "📊 Changes since: $PREV_TAG"
+          else
+            echo "📊 Initial release"
+          fi
+
+          # Create changelog content
+          cat > changelog.md << EOF
+          # Harbor Container Updater $VERSION
+
+          **Milestone**: $MILESTONE
+          **Release Date**: $(date -u '+%Y-%m-%d')
+          **Release Type**: ${{ needs.validate-release.outputs.is-prerelease == 'true' && 'Pre-release' || 'Stable Release' }}
+
+          ## 🎯 Milestone Progress
+
+          Harbor follows a structured development roadmap with clear milestones:
+
+          - **M0 (Foundation)**: Project infrastructure, CI/CD, basic app structure ✅
+          - **M1 (Discovery)**: Container discovery and registry integration 🚧
+          - **M2 (Updates)**: Safe update engine with rollback capability 📋
+          - **M3 (Automation)**: Scheduling and web interface 📋
+          - **M4 (Observability)**: Monitoring and metrics 📋
+          - **M5 (Production)**: Security hardening and performance 📋
+          - **M6 (Release)**: Community launch and documentation 📋
+
+          Current status: **$MILESTONE Phase**
+
+          ## 📦 Installation
+
+          ### Quick Start (30 seconds)
+          \`\`\`bash
+          docker run -d --name harbor --restart unless-stopped \\
+            -p 8080:8080 \\
+            -v /var/run/docker.sock:/var/run/docker.sock:ro \\
+            -v harbor-data:/app/data \\
+            ghcr.io/deusextaco/harbor:$VERSION
+          \`\`\`
+
+          ### Docker Compose
+          \`\`\`yaml
+          version: '3.8'
+          services:
+            harbor:
+              image: ghcr.io/deusextaco/harbor:$VERSION
+              container_name: harbor
+              restart: unless-stopped
+              ports:
+                - "8080:8080"
+              volumes:
+                - /var/run/docker.sock:/var/run/docker.sock:ro
+                - harbor_data:/app/data
+              environment:
+                - HARBOR_MODE=homelab
+              labels:
+                - "harbor.exclude=true"
+
+          volumes:
+            harbor_data:
+          \`\`\`
+
+          ## 🌟 What's New in $VERSION
+
+          EOF
+
+          # Add commit log if we have a previous tag
+          if [ -n "$PREV_TAG" ]; then
+            echo "### 📄 Changes Since $PREV_TAG" >> changelog.md
+            echo "" >> changelog.md
+
+            # Get commits since last tag with better formatting
+            git log --pretty=format:"- %s (%h)" "$PREV_TAG"..HEAD --no-merges >> changelog.md
+            echo "" >> changelog.md
+            echo "" >> changelog.md
+
+            # Get contributor information
+            echo "### 👥 Contributors" >> changelog.md
+            echo "" >> changelog.md
+            git log --pretty=format:"- %an" "$PREV_TAG"..HEAD --no-merges | sort -u >> changelog.md
+            echo "" >> changelog.md
+          else
+            cat >> changelog.md << EOF
+          ### 🎉 Initial Release Features
+
+          - ✅ FastAPI-based web framework with automatic OpenAPI documentation
+          - ✅ Zero-configuration deployment for home labs
+          - ✅ SQLite database with automatic migrations
+          - ✅ Profile-based configuration (homelab, development, production)
+          - ✅ Comprehensive health checks and monitoring endpoints
+          - ✅ Docker container health checking
+          - ✅ Complete CI/CD pipeline with multi-stage testing
+          - ✅ Security scanning and vulnerability detection
+          - ✅ Multi-architecture Docker images (amd64 ready, arm64/armv7 planned)
+          - ✅ Development environment with hot reload
+          - ✅ Comprehensive test suite with unit and integration tests
+
+          ### 🗗️ Foundation Complete
+
+          This release completes the M0 (Foundation) milestone, establishing:
+          - Solid project structure following open-source best practices
+          - Comprehensive CI/CD pipeline with automated testing and security scanning
+          - Development-friendly tooling and documentation
+          - Production-ready Docker images and deployment configurations
+          - Extensible architecture ready for M1 feature development
+
+          EOF
+          fi
+
+          # Add footer
+          cat >> changelog.md << EOF
+          ## 🚀 Getting Started
+
+          1. **Quick Setup**: Use the Docker command above for instant deployment
+          2. **Dashboard**: Visit http://localhost:8080 after startup
+          3. **Documentation**: Full documentation at https://harbor-docs.dev
+          4. **Support**: GitHub Issues for bug reports and feature requests
+
+          ## 🛣️ What's Next
+
+          ### M1 Milestone (Container Discovery & Registry Integration)
+          - Automatic container discovery with change detection
+          - Multi-registry support (Docker Hub, GHCR, private registries)
+          - Intelligent caching and rate limiting
+          - Container specification analysis and tracking
+
+          ### Future Milestones
+          - **M2**: Safe update engine with health checks and rollback
+          - **M3**: Scheduling system and comprehensive web interface
+          - **M4**: Monitoring, metrics, and alerting
+          - **M5**: Production hardening and enterprise features
+          - **M6**: Community launch and ecosystem integration
+
+          ## 📊 Technical Details
+
+          - **Supported Platforms**: linux/amd64 (arm64/armv7 coming in M1)
+          - **Python Version**: 3.11+ (tested on 3.11, 3.12, 3.13)
+          - **Database**: SQLite (PostgreSQL support in M7+)
+          - **Web Framework**: FastAPI with uvicorn
+          - **Container Runtime**: Docker (Kubernetes/Podman planned)
+
+          ---
+
+          **Full Changelog**: https://github.com/DeusExTaco/harbor/compare/$PREV_TAG...$VERSION
+          EOF
+
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          cat changelog.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create release notes summary
+        id: release-notes
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          MILESTONE="${{ needs.validate-release.outputs.milestone }}"
+
+          # Create concise release notes for GitHub release
+          cat > release-notes.md << EOF
+          Harbor Container Updater $VERSION - $MILESTONE Milestone
+
+          🎯 **$MILESTONE Phase**: ${{ needs.validate-release.outputs.milestone == 'M0' && 'Foundation Complete' || 'Development Phase' }}
+
+          ## 🚀 Quick Start
+          \`\`\`bash
+          docker run -d --name harbor --restart unless-stopped \\
+            -p 8080:8080 \\
+            -v /var/run/docker.sock:/var/run/docker.sock:ro \\
+            ghcr.io/deusextaco/harbor:$VERSION
+          \`\`\`
+
+          Dashboard: http://localhost:8080
+
+          ## 📦 Available Images
+          - \`ghcr.io/deusextaco/harbor:$VERSION\`
+          - \`dextaco/harbor:$VERSION\`
+
+          See full changelog below for detailed changes and migration notes.
+          EOF
+
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          cat release-notes.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Upload changelog artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-changelog-${{ needs.validate-release.outputs.version }}
+          path: |
+            changelog.md
+            release-notes.md
+          retention-days: 90
+
+  # =============================================================================
+  # Create GitHub Release
+  # =============================================================================
+  create-release:
+    name: Create GitHub Release
+    needs: [validate-release, release-tests, release-security, release-build, release-container-scan, generate-changelog]
+    if: |
+      always() &&
+      needs.validate-release.outputs.should-proceed == 'true' &&
+      needs.release-tests.result == 'success' &&
+      (needs.release-security.result == 'success' || needs.release-security.result == 'skipped') &&
+      needs.release-build.result == 'success' &&
+      (needs.release-container-scan.result == 'success' || needs.release-container-scan.result == 'skipped')
+    runs-on: ubuntu-latest
+
+    outputs:
+      release-url: ${{ steps.create-release.outputs.html_url }}
+      upload-url: ${{ steps.create-release.outputs.upload_url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        id: create-release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # pragma: allowlist secret
+        with:
+          tag_name: ${{ needs.validate-release.outputs.version }}
+          release_name: Harbor ${{ needs.validate-release.outputs.version }} - ${{ needs.validate-release.outputs.milestone }} Milestone
+          body: |
+            ${{ needs.generate-changelog.outputs.release-notes }}
+
+            ---
+
+            ${{ needs.generate-changelog.outputs.changelog }}
+          draft: false
+          prerelease: ${{ needs.validate-release.outputs.is-prerelease }}
+
+      - name: Upload Docker Compose examples
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # pragma: allowlist secret
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: examples/home-lab/basic/docker-compose.yml
+          asset_name: docker-compose-homelab.yml
+          asset_content_type: application/x-yaml
+
+      - name: Create release summary
+        run: |
+          echo "🎉 Harbor ${{ needs.validate-release.outputs.version }} Released!"
+          echo "============================================="
+          echo ""
+          echo "📋 Release Details:"
+          echo "  Version: ${{ needs.validate-release.outputs.version }}"
+          echo "  Milestone: ${{ needs.validate-release.outputs.milestone }}"
+          echo "  Pre-release: ${{ needs.validate-release.outputs.is-prerelease }}"
+          echo "  Release URL: ${{ steps.create-release.outputs.html_url }}"
+          echo ""
+          echo "🐳 Docker Images:"
+          echo "  ghcr.io/deusextaco/harbor:${{ needs.validate-release.outputs.version-clean }}"
+          echo "  dextaco/harbor:${{ needs.validate-release.outputs.version-clean }}"
+          echo ""
+          echo "🚀 Quick Start:"
+          echo "  docker run -d -p 8080:8080 ghcr.io/deusextaco/harbor:${{ needs.validate-release.outputs.version-clean }}"
+          echo ""
+          echo "✅ All release checks passed:"
+          echo "  - Tests: ${{ needs.release-tests.result }}"
+          echo "  - Security: ${{ needs.release-security.result }}"
+          echo "  - Build: ${{ needs.release-build.result }}"
+          echo "  - Container Scan: ${{ needs.release-container-scan.result }}"
+
+  # =============================================================================
+  # Post-Release Actions
+  # =============================================================================
+  post-release:
+    name: Post-Release Actions
+    needs: [validate-release, create-release]
+    if: |
+      always() &&
+      needs.validate-release.outputs.should-proceed == 'true' &&
+      needs.create-release.result == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4

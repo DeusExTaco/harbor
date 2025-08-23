@@ -391,6 +391,129 @@ dev-help-examples: ## Show help for using examples
 	@echo "   make dev-example-down       - Stop all examples"
 
 # =============================================================================
+# Release Management (following Harbor project structure)
+# =============================================================================
+release-status: ## Show current release status and version information
+	@echo "🚢 Harbor Release Status"
+	@echo "======================="
+	@echo ""
+	@scripts/release/release.sh status
+
+release-versions: ## Show suggested next version numbers
+	@echo "📈 Harbor Version Suggestions"
+	@echo "============================"
+	@scripts/release/release.sh versions
+
+release-prepare: ## Prepare release branch with version updates (Usage: make release-prepare VERSION=0.1.1)
+	@if [ -z "$(VERSION)" ]; then \
+		echo "❌ VERSION parameter required"; \
+		echo "Usage: make release-prepare VERSION=0.1.1"; \
+		exit 1; \
+	fi
+	@echo "🚀 Preparing Harbor release $(VERSION)..."
+	@scripts/release/release.sh prepare $(VERSION)
+
+release-tag: ## Create and push release tag (Usage: make release-tag VERSION=0.1.1)
+	@if [ -z "$(VERSION)" ]; then \
+		echo "❌ VERSION parameter required"; \
+		echo "Usage: make release-tag VERSION=0.1.1"; \
+		exit 1; \
+	fi
+	@echo "🏷️ Creating Harbor release tag v$(VERSION)..."
+	@scripts/release/release.sh tag $(VERSION)
+
+release-validate: ## Validate version consistency across project files
+	@echo "🔍 Validating Harbor version consistency..."
+	@python scripts/release/validate_version.py validate
+
+release-changelog: ## Generate changelog for version (Usage: make release-changelog VERSION=0.1.1)
+	@if [ -z "$(VERSION)" ]; then \
+		echo "❌ VERSION parameter required"; \
+		echo "Usage: make release-changelog VERSION=0.1.1"; \
+		exit 1; \
+	fi
+	@echo "📝 Generating changelog for Harbor $(VERSION)..."
+	@python scripts/release/validate_version.py changelog --version $(VERSION)
+
+release-changelog-file: ## Generate changelog and update CHANGELOG.md (Usage: make release-changelog-file VERSION=0.1.1)
+	@if [ -z "$(VERSION)" ]; then \
+		echo "❌ VERSION parameter required"; \
+		echo "Usage: make release-changelog-file VERSION=0.1.1"; \
+		exit 1; \
+	fi
+	@echo "📝 Updating CHANGELOG.md for Harbor $(VERSION)..."
+	@python scripts/release/validate_version.py changelog --version $(VERSION) --output temp-changelog.md
+	@echo "✅ Changelog generated in temp-changelog.md"
+	@echo "💡 Review and manually merge into CHANGELOG.md"
+
+release-increment: ## Show incremented version (Usage: make release-increment TYPE=patch)
+	@if [ -z "$(TYPE)" ]; then \
+		echo "❌ TYPE parameter required"; \
+		echo "Usage: make release-increment TYPE=patch"; \
+		echo "Valid types: major, minor, patch, rc"; \
+		exit 1; \
+	fi
+	@scripts/release/release.sh increment $(TYPE)
+
+release-help: ## Show detailed release management help
+	@echo "🚢 Harbor Release Management Commands"
+	@echo "===================================="
+	@echo ""
+	@echo "Following Harbor Project Structure from foundational documents"
+	@echo ""
+	@echo "📊 Status Commands:"
+	@echo "   make release-status              # Show current release status"
+	@echo "   make release-versions            # Show suggested next versions"
+	@echo "   make release-validate            # Validate version consistency"
+	@echo ""
+	@echo "🔢 Version Commands:"
+	@echo "   make release-increment TYPE=patch   # Show next patch version"
+	@echo "   make release-increment TYPE=minor   # Show next minor version"
+	@echo "   make release-increment TYPE=major   # Show next major version"
+	@echo "   make release-increment TYPE=rc      # Show next RC version"
+	@echo ""
+	@echo "📝 Changelog Commands:"
+	@echo "   make release-changelog VERSION=0.1.1           # Generate changelog"
+	@echo "   make release-changelog-file VERSION=0.1.1      # Update CHANGELOG.md"
+	@echo ""
+	@echo "🚀 Release Process:"
+	@echo "   1. make release-status                          # Check current status"
+	@echo "   2. make release-prepare VERSION=0.1.1          # Prepare release branch"
+	@echo "   3. Create PR and review changes                 # Manual review"
+	@echo "   4. Merge PR to main                             # Manual merge"
+	@echo "   5. make release-tag VERSION=0.1.1              # Create release tag"
+	@echo ""
+	@echo "🎯 Harbor Milestone Mapping:"
+	@echo "   0.1.x → M0 (Foundation)       - Project infrastructure, CI/CD"
+	@echo "   0.2.x → M1 (Discovery)        - Container discovery, registry integration"
+	@echo "   0.3.x → M2 (Updates)          - Safe update engine with rollback"
+	@echo "   0.4.x → M3 (Automation)       - Scheduling and web interface"
+	@echo "   0.5.x → M4 (Observability)    - Monitoring and metrics"
+	@echo "   0.6.x → M5 (Production)       - Security hardening, performance"
+	@echo "   1.0.x → M6 (Release)          - Community launch, documentation"
+	@echo ""
+	@echo "📚 Documentation:"
+	@echo "   Release Guide: docs/development/releases.md"
+	@echo "   Semantic Versioning: https://semver.org"
+	@echo "   Changelog Format: https://keepachangelog.com"
+
+# Quick release workflows
+release-quick-patch: ## Quick patch release workflow (current version + 0.0.1)
+	@CURRENT_VERSION=$$(scripts/release/release.sh increment patch); \
+	echo "🚀 Quick patch release: $$CURRENT_VERSION"; \
+	make release-prepare VERSION=$$CURRENT_VERSION
+
+release-quick-minor: ## Quick minor release workflow (current version + 0.1.0)
+	@CURRENT_VERSION=$$(scripts/release/release.sh increment minor); \
+	echo "🚀 Quick minor release: $$CURRENT_VERSION"; \
+	make release-prepare VERSION=$$CURRENT_VERSION
+
+release-quick-rc: ## Quick RC release workflow (current version + RC)
+	@CURRENT_VERSION=$$(scripts/release/release.sh increment rc); \
+	echo "🚀 Quick RC release: $$CURRENT_VERSION"; \
+	make release-prepare VERSION=$$CURRENT_VERSION
+
+# =============================================================================
 # Default target
 # =============================================================================
 .DEFAULT_GOAL := help
