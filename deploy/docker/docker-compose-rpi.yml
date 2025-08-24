@@ -1,0 +1,98 @@
+# Harbor Container Updater - Raspberry Pi Optimized Deployment
+# Optimized for Raspberry Pi 3 and 4 with memory and CPU constraints
+# deploy/docker/docker-compose-rpi.yml
+
+version: '3.8'
+
+services:
+  harbor:
+    image: ghcr.io/deusextaco/harbor:${HARBOR_VERSION:-latest}
+    container_name: harbor
+    restart: unless-stopped
+    ports:
+      - "${HARBOR_PORT:-8080}:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - harbor_data:/app/data
+      - harbor_logs:/app/logs
+    environment:
+      # Core configuration
+      - HARBOR_MODE=homelab
+      - HARBOR_TIMEZONE=${TIMEZONE:-UTC}
+      - LOG_LEVEL=INFO
+
+      # Raspberry Pi specific optimizations
+      - HARBOR_MAX_WORKERS=1              # Single worker for Pi
+      - MAX_CONCURRENT_UPDATES=1          # One update at a time
+      - DATABASE_POOL_SIZE=2              # Smaller pool for memory efficiency
+      - LOG_RETENTION_DAYS=7              # Less storage usage
+      - REGISTRY_CACHE_TTL=7200           # Longer cache for slow network
+      - ENABLE_METRICS=false              # Reduce overhead
+      - ENABLE_AUTO_DISCOVERY=true
+
+      # Performance tuning for ARM
+      - PYTHONOPTIMIZE=1                  # Enable Python optimizations
+      - MALLOC_TRIM_THRESHOLD_=100000     # Aggressive memory trimming
+      - REGISTRY_TIMEOUT=60               # Longer timeout for slow connections
+      - REGISTRY_RETRY_COUNT=5            # More retries for unreliable connections
+      - PULL_TIMEOUT_SECONDS=1800         # 30min timeout for image pulls
+      - UPDATE_TIMEOUT_SECONDS=900        # 15min timeout for updates
+      - CLEANUP_KEEP_IMAGES=1             # Minimal image retention
+
+      # Feature flags for resource conservation
+      - DISABLE_BACKGROUND_TASKS=false    # Keep essential tasks only
+      - ENABLE_SIMPLE_MODE=true           # Hide advanced features
+      - SHOW_GETTING_STARTED=true         # Help new users
+    deploy:
+      resources:
+        limits:
+          memory: 256M                    # Strict memory limit
+          cpus: '0.75'                    # Leave CPU for other processes
+        reservations:
+          memory: 128M                    # Minimum memory reservation
+          cpus: '0.25'                    # Minimum CPU reservation
+    labels:
+      - "harbor.exclude=true"             # Don't update Harbor itself
+      - "com.harbor.platform=raspberry-pi"
+      - "backup.enable=true"
+    healthcheck:
+      test: ["CMD", "python", "/app/scripts/health_check.py"]
+      interval: 60s                      # Less frequent health checks
+      timeout: 20s                       # Longer timeout for ARM
+      retries: 3
+      start_period: 180s                 # Longer startup time for ARM
+
+  # Optional: Minimal monitoring for Pi (if needed)
+  # Uncomment and customize based on available resources
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: harbor-prometheus
+  #   restart: unless-stopped
+  #   command:
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #     - '--storage.tsdb.path=/prometheus'
+  #     - '--storage.tsdb.retention.time=7d'  # Short retention for Pi
+  #   ports:
+  #     - "9090:9090"
+  #   volumes:
+  #     - ./prometheus-rpi.yml:/etc/prometheus/prometheus.yml:ro
+  #     - prometheus_data:/prometheus
+  #   profiles:
+  #     - monitoring
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 128M
+  #         cpus: '0.25'
+
+volumes:
+  harbor_data:
+    driver: local
+  harbor_logs:
+    driver: local
+  # prometheus_data:
+  #   driver: local
+
+networks:
+  default:
+    name: harbor-rpi-network

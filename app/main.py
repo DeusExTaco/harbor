@@ -53,16 +53,30 @@ def create_app() -> FastAPI:
     def health_check() -> dict[str, Any]:
         """Basic health check endpoint for container orchestration."""
         try:
+            # Import platform detection
+            import platform
+
             # Basic health check - in future milestones we'll add:
             # - Database connectivity
             # - Docker socket accessibility
             # - Registry connectivity
             return {
-                "status": "healthy",  # Changed from "healthy" to be more explicit
+                "status": "healthy",
                 "version": __version__,
                 "milestone": __milestone__,
                 "deployment_profile": deployment_profile,
-                "python_version": sys.version,
+                "platform": {
+                    "architecture": platform.machine(),
+                    "system": platform.system(),
+                    "python_version": platform.python_version(),
+                    "target_platform": os.getenv('HARBOR_TARGET_PLATFORM', 'auto-detected'),
+                },
+                "optimizations": {
+                    "max_workers": os.getenv('HARBOR_MAX_WORKERS', 'auto'),
+                    "max_concurrent_updates": os.getenv('MAX_CONCURRENT_UPDATES', '5'),
+                    "database_pool_size": os.getenv('DATABASE_POOL_SIZE', '10'),
+                    "metrics_enabled": os.getenv('ENABLE_METRICS', 'true').lower() == 'true',
+                },
                 "timestamp": "2024-01-01T00:00:00Z",  # TODO: Add real timestamp in M1
             }
         except Exception as e:

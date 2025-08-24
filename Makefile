@@ -517,3 +517,549 @@ release-quick-rc: ## Quick RC release workflow (current version + RC)
 # Default target
 # =============================================================================
 .DEFAULT_GOAL := help
+
+# =============================================================================
+# Multi-Architecture Build Commands (Add to existing Makefile)
+# Following Harbor Project Structure from foundational documents
+# =============================================================================
+
+# Multi-architecture configuration
+PLATFORMS = linux/amd64,linux/arm64,linux/arm/v7
+SINGLE_PLATFORM = linux/amd64
+VERSION = $(shell grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+GHCR_IMAGE = ghcr.io/deusextaco/harbor
+DOCKERHUB_IMAGE = dextaco/harbor
+
+# =============================================================================
+# Multi-Architecture Build Commands
+# =============================================================================
+
+build-multiarch: ## Build multi-architecture images locally
+	@echo "🗏️ Building Harbor multi-architecture images..."
+	@echo "Platforms: $(PLATFORMS)"
+	@echo "Version: $(VERSION)"
+	@echo ""
+	@echo "📋 Platform Summary:"
+	@echo "   🖥️ AMD64: Full performance, all features"
+	@echo "   🎯 ARM64: Balanced performance for Apple Silicon & Pi 4"
+	@echo "   🥧 ARMv7: Memory-optimized for Raspberry Pi 3"
+	@echo ""
+	docker buildx create --name harbor-builder --use || docker buildx use harbor-builder
+	docker buildx build \
+		--platform $(PLATFORMS) \
+		--file deploy/docker/Dockerfile \
+		--tag $(GHCR_IMAGE):$(VERSION) \
+		--tag $(GHCR_IMAGE):latest \
+		--build-arg HARBOR_VERSION=$(VERSION) \
+		--build-arg BUILD_MODE=production \
+		--load \
+		.
+	@echo "✅ Multi-architecture build completed!"
+	@echo ""
+	@echo "🎯 Usage Examples:"
+	@echo "   AMD64:  docker run -d -p 8080:8080 $(GHCR_IMAGE):$(VERSION)"
+	@echo "   ARM64:  docker run -d -p 8080:8080 -e HARBOR_MAX_WORKERS=2 $(GHCR_IMAGE):$(VERSION)"
+	@echo "   ARMv7:  docker run -d -p 8080:8080 -e HARBOR_MAX_WORKERS=1 $(GHCR_IMAGE):$(VERSION)"
+
+build-multiarch-push: ## Build and push multi-architecture images
+	@echo "🏗️ Building and pushing Harbor multi-architecture images..."
+	@echo "Platforms: $(PLATFORMS)"
+	@echo "Version: $(VERSION)"
+	@echo ""
+	docker buildx create --name harbor-builder --use || docker buildx use harbor-builder
+	docker buildx build \
+		--platform $(PLATFORMS) \
+		--file deploy/docker/Dockerfile \
+		--tag $(GHCR_IMAGE):$(VERSION) \
+		--tag $(GHCR_IMAGE):latest \
+		--build-arg HARBOR_VERSION=$(VERSION) \
+		--build-arg BUILD_MODE=production \
+		--push \
+		.
+	@echo "✅ Multi-architecture images built and pushed!"
+
+build-single: ## Build single-platform image (fast for development)
+	@echo "🔧 Building Harbor single-platform image ($(SINGLE_PLATFORM))..."
+	docker buildx build \
+		--platform $(SINGLE_PLATFORM) \
+		--file deploy/docker/Dockerfile.dev \
+		--tag harbor:dev \
+		--build-arg HARBOR_VERSION=$(VERSION)-dev \
+		--build-arg BUILD_MODE=development \
+		--load \
+		.
+	@echo "✅ Single-platform development image built!"
+
+# =============================================================================
+# Platform Testing Commands
+# =============================================================================
+
+test-multiarch: ## Test all platform images
+	@echo "🧪 Testing Harbor multi-platform images..."
+	@chmod +x scripts/test-multi-platform.sh
+	@scripts/test-multi-platform.sh
+
+test-multiarch-ghcr: ## Test GHCR multi-platform images only
+	@echo "🧪 Testing GHCR multi-platform images..."
+	@chmod +x scripts/test-multi-platform.sh
+	@scripts/test-multi-platform.sh --ghcr-only
+
+test-multiarch-dockerhub: ## Test Docker Hub multi-platform images only
+	@echo "🧪 Testing Docker Hub multi-platform images..."
+	@chmod +x scripts/test-multi-platform.sh
+	@scripts/test-multi-platform.sh --dockerhub-only
+
+test-multiarch-benchmark: ## Run startup performance benchmarks across platforms
+	@echo "📊 Running multi-platform performance benchmarks..."
+	@chmod +x scripts/test-multi-platform.sh
+	@scripts/test-multi-platform.sh --benchmark
+
+test-multiarch-cleanup: ## Clean up all multi-platform test containers
+	@echo "🧹 Cleaning up multi-platform test containers..."
+	@scripts/test-multi-platform.sh cleanup
+
+# =============================================================================
+# Platform-Specific Development
+# =============================================================================
+
+dev-rpi: ## Start development environment optimized for Raspberry Pi
+	@echo "🥧 Starting Raspberry Pi optimized development environment..."
+	@cd examples/home-lab/raspberry-pi && docker-compose up -d
+	@echo "✅ Raspberry Pi development environment started!"
+	@echo "🌐 Harbor available at: http://localhost:8080"
+
+dev-rpi-down: ## Stop Raspberry Pi development environment
+	@echo "🛑 Stopping Raspberry Pi development environment..."
+	@cd examples/home-lab/raspberry-pi && docker-compose down
+
+dev-arm64: ## Start development environment optimized for ARM64
+	@echo "🍎 Starting ARM64 optimized development environment..."
+	@cd deploy/docker && HARBOR_MAX_WORKERS=2 MAX_CONCURRENT_UPDATES=1 docker-compose -f docker-compose.dev.yml up -d
+	@echo "✅ ARM64 development environment started!"
+
+# =============================================================================
+# Platform Information and Utilities
+# =============================================================================
+
+build-info: ## Show build configuration and platform information
+	@echo "🏗️ Harbor Multi-Architecture Build Information"
+	@echo "=============================================="
+	@echo ""
+	@echo "📦 Project Information:"
+	@echo "   Version: $(VERSION)"
+	@echo "   Image Base: $(GHCR_IMAGE)"
+	@echo "   Supported Platforms: $(PLATFORMS)"
+	@echo ""
+	@echo "🖥️ Host Information:"
+	@uname -a
+	@echo ""
+	@echo "🐳 Docker Information:"
+	@docker version --format 'json' | jq -r '.Client.Version' | sed 's/^/   Docker Version: /' 2>/dev/null || docker --version
+	@docker buildx version 2>/dev/null | sed 's/^/   Buildx Version: /' || echo "   Buildx: Not available"
+	@echo ""
+	@echo "🏗️ Available Builders:"
+	@docker buildx ls 2>/dev/null || echo "   No buildx builders available"
+
+platform-detect: ## Detect current platform and show optimization recommendations
+	@echo "🔍 Platform Detection and Optimization Recommendations"
+	@echo "====================================================="
+	@echo ""
+	@echo "🖥️ Host Platform:"
+	@ARCH=$$(uname -m); \
+	case "$$ARCH" in \
+		"x86_64"|"amd64") \
+			echo "   Architecture: x86_64/AMD64"; \
+			echo "   Recommendation: Use standard Harbor deployment"; \
+			echo "   Docker Run: docker run -d -p 8080:8080 $(GHCR_IMAGE):$(VERSION)"; \
+			;; \
+		"aarch64"|"arm64") \
+			echo "   Architecture: ARM64"; \
+			echo "   Recommendation: Use ARM64 optimized deployment"; \
+			echo "   Docker Run: docker run -d -p 8080:8080 -e HARBOR_MAX_WORKERS=2 $(GHCR_IMAGE):$(VERSION)"; \
+			;; \
+		"armv7l") \
+			echo "   Architecture: ARMv7"; \
+			echo "   Recommendation: Use Raspberry Pi optimized deployment"; \
+			echo "   Docker Run: docker run -d -p 8080:8080 -e HARBOR_MAX_WORKERS=1 -e LOG_RETENTION_DAYS=7 $(GHCR_IMAGE):$(VERSION)"; \
+			;; \
+		*) \
+			echo "   Architecture: $$ARCH (Unknown)"; \
+			echo "   Recommendation: Try AMD64 image with platform override"; \
+			echo "   Docker Run: docker run --platform linux/amd64 -d -p 8080:8080 $(GHCR_IMAGE):$(VERSION)"; \
+			;; \
+	esac
+	@echo ""
+	@echo "📱 Available Platform Images:"
+	@echo "   Multi-platform: $(GHCR_IMAGE):$(VERSION)"
+	@echo "   AMD64 specific: $(GHCR_IMAGE):$(VERSION)-amd64"
+	@echo "   ARM64 specific: $(GHCR_IMAGE):$(VERSION)-arm64"
+	@echo "   ARMv7 specific: $(GHCR_IMAGE):$(VERSION)-armv7"
+
+# =============================================================================
+# Platform-Specific Example Deployments
+# =============================================================================
+
+example-amd64: ## Deploy AMD64 optimized example
+	@echo "🖥️ Starting AMD64 optimized Harbor example..."
+	@cd examples/home-lab/basic && docker-compose up -d
+	@echo "✅ AMD64 example started at http://localhost:8080"
+
+example-arm64: ## Deploy ARM64 optimized example (Apple Silicon, Pi 4)
+	@echo "🍎 Starting ARM64 optimized Harbor example..."
+	@cd examples/home-lab/basic && HARBOR_MAX_WORKERS=2 MAX_CONCURRENT_UPDATES=1 docker-compose up -d
+	@echo "✅ ARM64 example started at http://localhost:8080"
+
+example-armv7: ## Deploy ARMv7 optimized example (Raspberry Pi 3)
+	@echo "🥧 Starting ARMv7 optimized Harbor example..."
+	@cd examples/home-lab/raspberry-pi && docker-compose up -d
+	@echo "✅ ARMv7 example started at http://localhost:8080"
+
+example-down: ## Stop all example deployments
+	@echo "🛑 Stopping all Harbor example deployments..."
+	@cd examples/home-lab/basic && docker-compose down 2>/dev/null || true
+	@cd examples/home-lab/raspberry-pi && docker-compose down 2>/dev/null || true
+	@echo "✅ All examples stopped"
+
+# =============================================================================
+# Multi-Architecture Development Workflows
+# =============================================================================
+
+dev-multiarch-setup: ## Set up multi-architecture development environment
+	@echo "🏗️ Setting up multi-architecture development environment..."
+	@echo ""
+	@echo "🔧 Creating docker buildx builder..."
+	docker buildx create --name harbor-multiarch --use || docker buildx use harbor-multiarch
+	@echo ""
+	@echo "🧪 Testing multi-platform capability..."
+	docker buildx inspect --bootstrap
+	@echo ""
+	@echo "✅ Multi-architecture development environment ready!"
+	@echo ""
+	@echo "🎯 Available commands:"
+	@echo "   make build-multiarch         # Build for all platforms locally"
+	@echo "   make test-multiarch          # Test all platform images"
+	@echo "   make platform-detect         # Show platform-specific recommendations"
+
+dev-multiarch-clean: ## Clean up multi-architecture development environment
+	@echo "🧹 Cleaning up multi-architecture development..."
+	@docker buildx rm harbor-multiarch 2>/dev/null || true
+	@docker buildx prune -f
+	@$(MAKE) test-multiarch-cleanup
+	@echo "✅ Multi-architecture development cleanup complete!"
+
+# =============================================================================
+# Quick Multi-Platform Workflows
+# =============================================================================
+
+quick-multiarch: dev-multiarch-setup build-multiarch test-multiarch ## Complete multi-arch build and test workflow
+
+quick-rpi: dev-rpi ## Quick Raspberry Pi development environment
+
+quick-platform-test: platform-detect test-multiarch-ghcr ## Quick platform detection and testing
+
+# =============================================================================
+# Multi-Architecture Help
+# =============================================================================
+
+help-multiarch: ## Show detailed multi-architecture help
+	@echo "🏗️ Harbor Multi-Architecture Build System"
+	@echo "=========================================="
+	@echo ""
+	@echo "Following Harbor Project Structure from foundational documents"
+	@echo ""
+	@echo "🎯 Supported Platforms:"
+	@echo "   linux/amd64     - Intel/AMD processors (full performance)"
+	@echo "   linux/arm64     - Apple Silicon, modern ARM servers, Raspberry Pi 4"
+	@echo "   linux/arm/v7    - Raspberry Pi 3, older ARM devices"
+	@echo ""
+	@echo "🔧 Build Commands:"
+	@echo "   make build-multiarch              # Build all platforms locally"
+	@echo "   make build-multiarch-push         # Build and push to registries"
+	@echo "   make build-single                 # Fast single-platform dev build"
+	@echo ""
+	@echo "🧪 Testing Commands:"
+	@echo "   make test-multiarch               # Test all platforms"
+	@echo "   make test-multiarch-ghcr          # Test GHCR images only"
+	@echo "   make test-multiarch-benchmark     # Performance benchmarks"
+	@echo "   make test-multiarch-cleanup       # Clean up test containers"
+	@echo ""
+	@echo "🥧 Platform-Specific Development:"
+	@echo "   make dev-rpi                      # Raspberry Pi optimized environment"
+	@echo "   make dev-arm64                    # ARM64 optimized environment"
+	@echo "   make example-armv7                # ARMv7 example deployment"
+	@echo ""
+	@echo "ℹ️ Platform Detection:"
+	@echo "   make platform-detect              # Show current platform and recommendations"
+	@echo "   make build-info                   # Show build system information"
+	@echo ""
+	@echo "🚀 Quick Workflows:"
+	@echo "   make quick-multiarch              # Complete build and test workflow"
+	@echo "   make quick-rpi                    # Quick Raspberry Pi setup"
+	@echo "   make quick-platform-test          # Quick platform test"
+	@echo ""
+	@echo "📚 Documentation:"
+	@echo "   Platform Guide: docs/platforms.md"
+	@echo "   ARM Deployment: docs/deployment/raspberry-pi.md"
+	@echo "   Performance Tuning: docs/configuration/performance.md"
+	@echo ""
+	@echo "🎯 Current Configuration:"
+	@echo "   Version: $(VERSION)"
+	@echo "   Platforms: $(PLATFORMS)"
+	@echo "   Base Image: $(GHCR_IMAGE)"
+	@echo ""
+	@echo "💡 Tips:"
+	@echo "   - Use 'make build-single' for fast development builds"
+	@echo "   - Use 'make build-multiarch' to test all platforms locally"
+	@echo "   - CI/CD automatically builds multi-arch on main branch"
+	@echo "   - ARMv7 builds are optimized for Raspberry Pi constraints"
+	@echo "   - ARM64 builds work natively on Apple Silicon"
+
+# =============================================================================
+# Multi-Architecture Testing and Validation Commands
+# Following Harbor Project Structure from foundational documents
+# =============================================================================
+
+test-quick: ## Run quick validation of multi-arch setup (2 minutes)
+	@echo "🚀 Running Harbor quick test suite..."
+	@echo "This validates: project structure, platform detection, Docker, basic build"
+	@chmod +x scripts/quick-test.sh scripts/dev/*.sh scripts/dev/*.py
+	@scripts/quick-test.sh
+
+test-ci-readiness: ## Check if repository is ready for CI/CD pipeline (1 minute)
+	@echo "🔍 Checking CI/CD readiness..."
+	@echo "Validates: required files, workflows, configs, versions"
+	@chmod +x scripts/check-ci-readiness.sh
+	@scripts/check-ci-readiness.sh
+
+test-platform-local: ## Test platform detection and optimization locally
+	@echo "🎯 Testing platform detection..."
+	@python scripts/detect_platform.py
+
+test-validate-multiarch: ## Validate multi-architecture development environment
+	@echo "✅ Validating multi-architecture setup..."
+	@python scripts/dev/validate-multiarch.py
+
+test-docker-environment: ## Test Docker and buildx setup
+	@echo "🐳 Testing Docker environment..."
+	@docker --version
+	@docker-compose --version || docker compose version
+	@docker buildx version
+	@docker buildx ls
+
+# =============================================================================
+# Complete Testing Workflows
+# =============================================================================
+
+test-workflow: test-quick test-ci-readiness ## Run complete local testing workflow (3 minutes)
+	@echo ""
+	@echo "🎉 Complete testing workflow finished!"
+	@echo ""
+	@echo "📋 Summary:"
+	@echo "  ✅ Quick tests passed"
+	@echo "  ✅ CI/CD readiness confirmed"
+	@echo ""
+	@echo "🚀 Ready to push to CI/CD pipeline!"
+	@echo ""
+	@echo "Next steps:"
+	@echo "  1. git add ."
+	@echo "  2. git commit -m 'feat: implement multi-architecture support'"
+	@echo "  3. git push"
+
+test-all-platforms: build-multiarch test-multiarch ## Build and test all platforms (10-15 minutes)
+	@echo ""
+	@echo "🌐 Multi-platform build and test completed!"
+	@echo ""
+	@echo "📋 Platform Testing Summary:"
+	@echo "  🖥️ AMD64: Full performance testing"
+	@echo "  🎯 ARM64: Native/emulated testing"
+	@echo "  🥧 ARMv7: Raspberry Pi 3 optimized testing"
+
+test-complete: test-workflow dev-multiarch-setup test-all-platforms ## Complete end-to-end testing (20 minutes)
+	@echo ""
+	@echo "🏆 COMPLETE MULTI-ARCHITECTURE TESTING FINISHED!"
+	@echo ""
+	@echo "✅ All tests passed:"
+	@echo "  • Project structure validated"
+	@echo "  • Platform detection working"
+	@echo "  • Multi-arch environment ready"
+	@echo "  • All platforms built and tested"
+	@echo ""
+	@echo "🚀 Ready for production CI/CD pipeline!"
+
+# =============================================================================
+# Multi-Architecture Build Testing
+# =============================================================================
+
+test-build-single: ## Test single platform build (fast)
+	@echo "🏗️ Testing single platform build..."
+	@docker build -f deploy/docker/Dockerfile.dev -t harbor:test-single .
+	@docker run --rm harbor:test-single python -c "\
+import sys, platform, app; \
+print('✅ Harbor image works!'); \
+print(f'Platform: {platform.machine()}'); \
+print(f'Python: {sys.version}'); \
+print(f'Harbor version: {app.__version__}') \
+"
+	@echo "✅ Single platform build test passed!"
+
+
+test-build-multiarch: build-multiarch ## Test multi-architecture build
+	@echo "🌐 Multi-architecture build completed!"
+	@echo "Images built for: $(PLATFORMS)"
+	@docker images | grep harbor
+
+test-container-startup: ## Test container startup and health checks
+	@echo "🚀 Testing container startup..."
+	@docker run -d --name harbor-startup-test -p 8099:8080 -e HARBOR_MODE=development harbor:test-single
+	@echo "Waiting for startup..."
+	@for i in $$(seq 1 30); do \
+		if curl -s http://localhost:8099/healthz > /dev/null; then \
+			echo "✅ Container started successfully ($$i seconds)"; \
+			break; \
+		fi; \
+		if [ $$i -eq 30 ]; then \
+			echo "❌ Container failed to start"; \
+			docker logs harbor-startup-test; \
+			exit 1; \
+		fi; \
+		sleep 1; \
+	done
+	@echo "Testing health endpoint..."
+	@curl -s http://localhost:8099/healthz | jq '.status' || echo "Health check response received"
+	@docker stop harbor-startup-test
+	@docker rm harbor-startup-test
+	@echo "✅ Container startup test passed!"
+
+# =============================================================================
+# Platform-Specific Testing
+# =============================================================================
+
+test-amd64: ## Test AMD64 platform specifically
+	@echo "🖥️ Testing AMD64 platform..."
+	@docker run --platform linux/amd64 --rm $(GHCR_IMAGE):$(VERSION) python /app/scripts/detect_platform.py
+
+test-arm64: ## Test ARM64 platform specifically
+	@echo "🎯 Testing ARM64 platform..."
+	@docker run --platform linux/arm64 --rm $(GHCR_IMAGE):$(VERSION) python /app/scripts/detect_platform.py
+
+test-armv7: ## Test ARMv7 platform specifically
+	@echo "🥧 Testing ARMv7 platform..."
+	@docker run --platform linux/arm/v7 --rm $(GHCR_IMAGE):$(VERSION) python /app/scripts/detect_platform.py
+
+test-platforms-individual: test-amd64 test-arm64 test-armv7 ## Test each platform individually
+	@echo "✅ All individual platform tests completed!"
+
+# =============================================================================
+# CI/CD Simulation
+# =============================================================================
+
+test-ci-simulation: ## Simulate CI/CD pipeline locally
+	@echo "🔄 Simulating CI/CD pipeline locally..."
+	@echo ""
+	@echo "Stage 1: Code Quality"
+	@make dev-quality
+	@echo ""
+	@echo "Stage 2: Unit Tests"
+	@make dev-test-unit
+	@echo ""
+	@echo "Stage 3: Build Testing"
+	@make test-build-single
+	@echo ""
+	@echo "Stage 4: Container Testing"
+	@make test-container-startup
+	@echo ""
+	@echo "✅ CI/CD simulation completed successfully!"
+
+# =============================================================================
+# Troubleshooting and Diagnostics
+# =============================================================================
+
+test-diagnose: ## Diagnose testing environment issues
+	@echo "🔍 Diagnosing Harbor testing environment..."
+	@echo ""
+	@echo "📋 Environment Information:"
+	@echo "Host Platform: $$(uname -m) ($$(uname -s))"
+	@echo "Docker Version: $$(docker --version)"
+	@echo "Buildx Version: $$(docker buildx version || echo 'Not available')"
+	@echo ""
+	@echo "📁 Project Structure:"
+	@ls -la deploy/docker/ || echo "❌ deploy/docker/ missing"
+	@ls -la scripts/ || echo "❌ scripts/ missing"
+	@ls -la app/ || echo "❌ app/ missing"
+	@echo ""
+	@echo "🐳 Docker Status:"
+	@docker info --format '{{.OSType}}/{{.Architecture}}' || echo "❌ Docker not accessible"
+	@docker buildx ls || echo "❌ Buildx not available"
+	@echo ""
+	@echo "🔧 Available Make Targets:"
+	@make help | grep test
+
+test-fix-permissions: ## Fix script permissions
+	@echo "🔧 Fixing script permissions..."
+	@chmod +x scripts/*.sh
+	@chmod +x scripts/dev/*.sh
+	@chmod +x scripts/dev/*.py
+	@chmod +x scripts/*.py
+	@echo "✅ Script permissions fixed"
+
+# =============================================================================
+# Testing Help and Documentation
+# =============================================================================
+
+test-help: ## Show detailed testing help and available commands
+	@echo "🧪 Harbor Multi-Architecture Testing Commands"
+	@echo "============================================="
+	@echo ""
+	@echo "📋 Quick Testing (start here):"
+	@echo "   make test-quick              # 2min - Essential validation"
+	@echo "   make test-ci-readiness       # 1min - CI/CD readiness check"
+	@echo "   make test-workflow           # 3min - Complete local testing"
+	@echo ""
+	@echo "🌐 Multi-Architecture Testing:"
+	@echo "   make test-platform-local     # Test platform detection"
+	@echo "   make test-validate-multiarch # Validate multi-arch environment"
+	@echo "   make test-docker-environment # Test Docker/buildx setup"
+	@echo "   make build-multiarch         # Build all platforms"
+	@echo "   make test-multiarch          # Test all platform images"
+	@echo "   make test-all-platforms      # Complete multi-arch workflow"
+	@echo ""
+	@echo "🏗️ Build Testing:"
+	@echo "   make test-build-single       # Fast single platform build test"
+	@echo "   make test-build-multiarch    # Multi-arch build test"
+	@echo "   make test-container-startup  # Container startup validation"
+	@echo ""
+	@echo "🎯 Platform-Specific Testing:"
+	@echo "   make test-amd64             # Test AMD64 optimizations"
+	@echo "   make test-arm64             # Test ARM64 optimizations"
+	@echo "   make test-armv7             # Test ARMv7 (Pi 3) optimizations"
+	@echo "   make test-platforms-individual # Test all platforms separately"
+	@echo ""
+	@echo "🐳 Development Testing:"
+	@echo "   make dev-test               # Run pytest in container"
+	@echo "   make dev-test-unit          # Unit tests only"
+	@echo "   make dev-test-integration   # Integration tests only"
+	@echo "   make dev-test-coverage      # Tests with coverage report"
+	@echo "   make dev-test-all           # All dev tests + quality"
+	@echo ""
+	@echo "🔄 CI/CD Simulation:"
+	@echo "   make test-ci-simulation     # Simulate full CI/CD locally"
+	@echo ""
+	@echo "🔧 Troubleshooting:"
+	@echo "   make test-diagnose          # Diagnose environment issues"
+	@echo "   make test-fix-permissions   # Fix script permissions"
+	@echo ""
+	@echo "🚀 Complete Workflows:"
+	@echo "   make test-complete          # Complete end-to-end testing (20min)"
+	@echo ""
+	@echo "🎯 Recommended Testing Sequence for Multi-Arch Changes:"
+	@echo "   1. make test-workflow           # Validate basics (3min)"
+	@echo "   2. make dev-multiarch-setup     # Setup multi-arch environment"
+	@echo "   3. make test-all-platforms      # Build and test all platforms (15min)"
+	@echo "   4. git commit && git push       # Trigger CI/CD pipeline"
+	@echo ""
+	@echo "📚 Documentation:"
+	@echo "   • Detailed guide: ./TESTING_CHECKLIST.md"
+	@echo "   • Quick start: make test-workflow"
+	@echo "   • Full help: make help"
+	@echo ""
+	@echo "🏁 Start Here: make test-workflow"

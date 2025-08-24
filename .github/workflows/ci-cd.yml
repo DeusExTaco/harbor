@@ -82,18 +82,22 @@ jobs:
       version: ${{ steps.config.outputs.version }}
       milestone: ${{ steps.config.outputs.milestone }}
       is-prerelease: ${{ steps.config.outputs.is-prerelease }}
+      platforms: ${{ steps.config.outputs.platforms }}
+      build-mode: ${{ steps.config.outputs.build-mode }}
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Configure build strategy
+      - name: Configure multi-architecture build strategy
         id: config
         run: |
           # Determine if this is a release (tag push)
           if [[ "${{ github.ref_type }}" == "tag" && "${{ github.ref }}" == refs/tags/v* ]]; then
             echo "is-release=true" >> $GITHUB_OUTPUT
             echo "should-build=true" >> $GITHUB_OUTPUT
+            echo "platforms=linux/amd64,linux/arm64,linux/arm/v7" >> $GITHUB_OUTPUT
+            echo "build-mode=production" >> $GITHUB_OUTPUT
 
             # Extract version from tag
             VERSION="${{ github.ref_name }}"  # e.g., v0.1.0-alpha.2
@@ -124,11 +128,13 @@ jobs:
             echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:$VERSION_CLEAN,${{ env.REGISTRY_IMAGE_DOCKERHUB }}:latest" >> $GITHUB_OUTPUT
             echo "ghcr-tags=${{ env.REGISTRY_IMAGE_GHCR }}:$VERSION_CLEAN,${{ env.REGISTRY_IMAGE_GHCR }}:latest" >> $GITHUB_OUTPUT
 
-            echo "🏷️ RELEASE BUILD for $VERSION (milestone: $MILESTONE)"
+            echo "🏷️ RELEASE BUILD for $VERSION (milestone: $MILESTONE) - ALL PLATFORMS"
 
           elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             echo "is-release=false" >> $GITHUB_OUTPUT
             echo "should-build=true" >> $GITHUB_OUTPUT
+            echo "platforms=linux/amd64,linux/arm64,linux/arm/v7" >> $GITHUB_OUTPUT  # Full multi-arch for main
+            echo "build-mode=production" >> $GITHUB_OUTPUT
             echo "version=${{ env.HARBOR_VERSION }}" >> $GITHUB_OUTPUT
             echo "milestone=${{ env.HARBOR_MILESTONE }}" >> $GITHUB_OUTPUT
             echo "is-prerelease=false" >> $GITHUB_OUTPUT
@@ -137,11 +143,13 @@ jobs:
             echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:latest,${{ env.REGISTRY_IMAGE_DOCKERHUB }}:main" >> $GITHUB_OUTPUT
             echo "ghcr-tags=${{ env.REGISTRY_IMAGE_GHCR }}:latest,${{ env.REGISTRY_IMAGE_GHCR }}:main" >> $GITHUB_OUTPUT
 
-            echo "📦 MAIN BRANCH BUILD"
+            echo "📦 MAIN BRANCH BUILD - ALL PLATFORMS"
 
           elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
             echo "is-release=false" >> $GITHUB_OUTPUT
             echo "should-build=true" >> $GITHUB_OUTPUT
+            echo "platforms=linux/amd64" >> $GITHUB_OUTPUT  # AMD64 only for dev speed
+            echo "build-mode=development" >> $GITHUB_OUTPUT
             echo "version=${{ env.HARBOR_VERSION }}-dev" >> $GITHUB_OUTPUT
             echo "milestone=${{ env.HARBOR_MILESTONE }}" >> $GITHUB_OUTPUT
             echo "is-prerelease=true" >> $GITHUB_OUTPUT
@@ -150,103 +158,39 @@ jobs:
             echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:develop" >> $GITHUB_OUTPUT
             echo "ghcr-tags=${{ env.REGISTRY_IMAGE_GHCR }}:develop" >> $GITHUB_OUTPUT
 
-            echo "🔧 DEVELOP BRANCH BUILD"
+            echo "🔧 DEVELOP BRANCH BUILD - AMD64 ONLY (for speed)"
 
           else
             echo "is-release=false" >> $GITHUB_OUTPUT
             echo "should-build=false" >> $GITHUB_OUTPUT
+            echo "platforms=linux/amd64" >> $GITHUB_OUTPUT
+            echo "build-mode=development" >> $GITHUB_OUTPUT
             echo "version=${{ env.HARBOR_VERSION }}" >> $GITHUB_OUTPUT
             echo "milestone=${{ env.HARBOR_MILESTONE }}" >> $GITHUB_OUTPUT
             echo "is-prerelease=false" >> $GITHUB_OUTPUT
 
-            echo "📝 PULL REQUEST - Build skipped"
+            echo "🔄 PULL REQUEST - Build skipped"
           fi
 
   # =============================================================================
-  # Stage 4: Docker Build & Publish (Enhanced for releases)
+  # Stage 4: Multi-Architecture Docker Build & Publish
   # =============================================================================
 
   docker-build:
-    name: Docker Build & Publish
+    name: Multi-Architecture Docker Build
     needs: [build-config]
     if: needs.build-config.outputs.should-build == 'true'
-    runs-on: ubuntu-latest
-
-    outputs:
-      build-successful: ${{ steps.build-result.outputs.success }}
-      image-tags: ${{ steps.build-result.outputs.tags }}
-      image-digest: ${{ steps.build.outputs.digest }}
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        if: env.REGISTRY_IMAGE_DOCKERHUB != ''
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            ${{ env.REGISTRY_IMAGE_DOCKERHUB }}
-            ${{ env.REGISTRY_IMAGE_GHCR }}
-          labels: |
-            org.opencontainers.image.title=Harbor Container Updater
-            org.opencontainers.image.description=Automated Docker container updates for home labs and enterprises
-            org.opencontainers.image.source=https://github.com/DeusExTaco/harbor
-            org.opencontainers.image.documentation=https://harbor-docs.dev
-            org.opencontainers.image.licenses=MIT
-            org.opencontainers.image.vendor=Harbor Team
-            org.opencontainers.image.version=${{ needs.build-config.outputs.version }}
-            harbor.milestone=${{ needs.build-config.outputs.milestone }}
-            harbor.deployment-profile=homelab
-            harbor.is-release=${{ needs.build-config.outputs.is-release }}
-
-      - name: Build and push Docker images
-        id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: deploy/docker/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ needs.build-config.outputs.docker-tags }}
-            ${{ needs.build-config.outputs.ghcr-tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          provenance: true
-          sbom: true
-
-      - name: Set build result
-        id: build-result
-        run: |
-          echo "success=true" >> $GITHUB_OUTPUT
-          echo "tags=${{ needs.build-config.outputs.docker-tags }},${{ needs.build-config.outputs.ghcr-tags }}" >> $GITHUB_OUTPUT
-          echo "🐳 Build completed successfully!"
+    uses: ./.github/workflows/docker-build.yml
+    secrets: inherit # pragma: allowlist secret
+    with:
+      platforms: ${{ needs.build-config.outputs.platforms }}
 
   # =============================================================================
-  # Stage 5: Container Security Scanning
+  # Stage 5: Container Security Scanning (Platform-Aware)
   # =============================================================================
 
   container-security:
-    name: Container Security Scan
+    name: Multi-Platform Container Security
     needs: [build-config, docker-build]
     if: |
       always() &&
@@ -280,45 +224,104 @@ jobs:
         with:
           fetch-depth: 0  # Need full history for changelog
 
-      - name: Generate release notes
+      - name: Generate multi-platform release notes
         id: release-notes
         run: |
           VERSION="${{ needs.build-config.outputs.version }}"
           MILESTONE="${{ needs.build-config.outputs.milestone }}"
+          PLATFORMS="${{ needs.docker-build.outputs.platforms-built }}"
 
           # Get previous tag for changelog
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
 
-          # Create release notes
+          # Create enhanced release notes with multi-platform info
           cat > release-notes.md << EOF
           Harbor Container Updater $VERSION - $MILESTONE Milestone
 
           🎯 **$MILESTONE Phase**: $([ "$MILESTONE" = "M0" ] && echo "Foundation Complete" || echo "Development Phase")
+          🏗️ **Multi-Platform**: Now supports $(echo "$PLATFORMS" | tr ',' ', ')
 
           ## 🚀 Quick Start
+
+          ### Universal (Auto-detects Platform)
           \`\`\`bash
           docker run -d --name harbor --restart unless-stopped \\
             -p 8080:8080 \\
             -v /var/run/docker.sock:/var/run/docker.sock:ro \\
+            -v harbor-data:/app/data \\
+            ghcr.io/deusextaco/harbor:$VERSION
+          \`\`\`
+
+          ### Platform-Specific Optimizations
+
+          **🖥️ x86_64 / Intel / AMD:**
+          \`\`\`bash
+          docker run -d --name harbor --restart unless-stopped \\
+            -p 8080:8080 \\
+            -v /var/run/docker.sock:/var/run/docker.sock:ro \\
+            -v harbor-data:/app/data \\
+            ghcr.io/deusextaco/harbor:$VERSION
+          \`\`\`
+
+          **🍎 Apple Silicon (M1/M2/M3):**
+          \`\`\`bash
+          docker run -d --name harbor --restart unless-stopped \\
+            -p 8080:8080 \\
+            -v /var/run/docker.sock:/var/run/docker.sock:ro \\
+            -v harbor-data:/app/data \\
+            ghcr.io/deusextaco/harbor:$VERSION
+          \`\`\`
+          *Native ARM64 - no emulation needed!*
+
+          **🥧 Raspberry Pi 4 (ARM64):**
+          \`\`\`bash
+          docker run -d --name harbor --restart unless-stopped \\
+            -p 8080:8080 \\
+            -v /var/run/docker.sock:/var/run/docker.sock:ro \\
+            -v harbor-data:/app/data \\
+            -e HARBOR_MAX_WORKERS=2 \\
+            -e MAX_CONCURRENT_UPDATES=1 \\
+            ghcr.io/deusextaco/harbor:$VERSION
+          \`\`\`
+
+          **🥧 Raspberry Pi 3 (ARMv7):**
+          \`\`\`bash
+          docker run -d --name harbor --restart unless-stopped \\
+            -p 8080:8080 \\
+            -v /var/run/docker.sock:/var/run/docker.sock:ro \\
+            -v harbor-data:/app/data \\
+            -e HARBOR_MAX_WORKERS=1 \\
+            -e MAX_CONCURRENT_UPDATES=1 \\
+            -e LOG_RETENTION_DAYS=7 \\
             ghcr.io/deusextaco/harbor:$VERSION
           \`\`\`
 
           Dashboard: http://localhost:8080
 
           ## 📦 Available Images
+
+          **Multi-Platform Manifest:**
           - \`ghcr.io/deusextaco/harbor:$VERSION\`
           - \`dextaco/harbor:$VERSION\`
 
-          ## 🏗️ M0 Foundation Features
-          - ✅ FastAPI-based web framework with automatic OpenAPI documentation
-          - ✅ Zero-configuration deployment for home labs
-          - ✅ SQLite database with automatic migrations
-          - ✅ Profile-based configuration (homelab, development, production)
-          - ✅ Comprehensive health checks and monitoring endpoints
-          - ✅ Complete CI/CD pipeline with multi-stage testing
-          - ✅ Security scanning and vulnerability detection
-          - ✅ Development environment with hot reload
-          - ✅ Release automation with semantic versioning
+          **Platform-Specific (if needed):**
+          - \`ghcr.io/deusextaco/harbor:$VERSION-amd64\`
+          - \`ghcr.io/deusextaco/harbor:$VERSION-arm64\`
+          - \`ghcr.io/deusextaco/harbor:$VERSION-armv7\`
+
+          ## 🗔️ M0 Foundation Features
+
+          - ✅ **Multi-Architecture Support**: Native builds for AMD64, ARM64, and ARMv7
+          - ✅ **Zero-Configuration Deployment**: Works out of the box on all platforms
+          - ✅ **Platform Optimization**: Automatic resource tuning based on architecture
+          - ✅ **FastAPI Framework**: High-performance async web framework
+          - ✅ **SQLite Database**: Zero-config database with automatic migrations
+          - ✅ **Profile-Based Configuration**: homelab, development, production profiles
+          - ✅ **Comprehensive Health Checks**: Multi-dimensional health monitoring
+          - ✅ **Complete CI/CD Pipeline**: Multi-stage testing with security scanning
+          - ✅ **Cross-Platform Testing**: Automated testing on all target architectures
+          - ✅ **Security Scanning**: Static analysis and container vulnerability scanning
+          - ✅ **Development Environment**: Hot reload with full tooling support
 
           ## 🛣️ What's Next
 
@@ -327,6 +330,31 @@ jobs:
           - Multi-registry support (Docker Hub, GHCR, private registries)
           - Intelligent caching and rate limiting
           - Container specification analysis and tracking
+          - **Enhanced ARM Support**: Optimized discovery for ARM-based home labs
+
+          ## 📱 Platform Compatibility
+
+          Harbor automatically detects your platform and optimizes accordingly:
+
+          | Platform | Architecture | Status | Optimizations |
+          |----------|-------------|---------|---------------|
+          | Intel/AMD | linux/amd64 | ✅ Native | Full performance |
+          | Apple Silicon | linux/arm64 | ✅ Native | Balanced performance |
+          | Raspberry Pi 4 | linux/arm64 | ✅ Native | Resource-conscious |
+          | Raspberry Pi 3 | linux/arm/v7 | ✅ Native | Memory-optimized |
+          | ARM Servers | linux/arm64 | ✅ Native | Full performance |
+
+          ## 🔧 Home Lab Examples
+
+          **Basic Home Lab (works on all platforms):**
+          \`\`\`bash
+          curl -fsSL https://get.harbor.dev/docker-compose.yml | docker-compose -f - up -d
+          \`\`\`
+
+          **Raspberry Pi Optimized:**
+          \`\`\`bash
+          curl -fsSL https://get.harbor.dev/raspberry-pi.yml | docker-compose -f - up -d
+          \`\`\`
 
           See full changelog and technical details at: https://github.com/DeusExTaco/harbor/releases/tag/v$VERSION
           EOF
@@ -342,12 +370,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v${{ needs.build-config.outputs.version }}
-          release_name: Harbor ${{ needs.build-config.outputs.version }} - ${{ needs.build-config.outputs.milestone }} Milestone
+          release_name: Harbor ${{ needs.build-config.outputs.version }} - ${{ needs.build-config.outputs.milestone }} Milestone (Multi-Platform)
           body: ${{ steps.release-notes.outputs.notes }}
           draft: false
           prerelease: ${{ needs.build-config.outputs.is-prerelease }}
 
-      - name: Upload Docker Compose example
+      - name: Upload Docker Compose examples
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -357,8 +385,18 @@ jobs:
           asset_name: docker-compose-homelab.yml
           asset_content_type: application/x-yaml
 
+      - name: Upload Raspberry Pi example
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: examples/home-lab/raspberry-pi/docker-compose.yml
+          asset_name: docker-compose-raspberry-pi.yml
+          asset_content_type: application/x-yaml
+
   # =============================================================================
-  # Stage 7: Final Status & Summary
+  # Stage 7: Final Status & Multi-Platform Summary
   # =============================================================================
 
   pipeline-summary:
@@ -368,9 +406,9 @@ jobs:
     if: always()
 
     steps:
-      - name: Generate enhanced pipeline summary
+      - name: Generate enhanced multi-platform pipeline summary
         run: |
-          echo "# 🚀 Harbor CI/CD Pipeline Summary" > pipeline-summary.md
+          echo "# 🚀 Harbor Multi-Platform CI/CD Pipeline Summary" > pipeline-summary.md
           echo "Generated on: $(date -u)" >> pipeline-summary.md
           echo "Pipeline ID: ${{ github.run_id }}" >> pipeline-summary.md
           echo "Commit: ${{ github.sha }}" >> pipeline-summary.md
@@ -385,35 +423,41 @@ jobs:
           echo "| 🔒 Static Security | ${{ needs.static-security.result }} | - |" >> pipeline-summary.md
           echo "| 📦 Dependency Security | ${{ needs.dependency-security.result }} | - |" >> pipeline-summary.md
           echo "| 🧪 Test Suite | ${{ needs.test-suite.result }} | - |" >> pipeline-summary.md
-          echo "| 🏗️ Build Config | ${{ needs.build-config.result }} | - |" >> pipeline-summary.md
-          echo "| 🐳 Docker Build | ${{ needs.docker-build.result }} | - |" >> pipeline-summary.md
+          echo "| 🗔️ Build Config | ${{ needs.build-config.result }} | - |" >> pipeline-summary.md
+          echo "| 🏗️ Multi-Arch Build | ${{ needs.docker-build.result }} | - |" >> pipeline-summary.md
           echo "| 🛡️ Container Security | ${{ needs.container-security.result }} | - |" >> pipeline-summary.md
           echo "| 🚀 GitHub Release | ${{ needs.create-github-release.result }} | - |" >> pipeline-summary.md
           echo "" >> pipeline-summary.md
 
-          # Enhanced status determination
+          # Enhanced status determination with platform info
           if [[ "${{ needs.code-quality.result }}" == "success" && \
                 "${{ needs.test-suite.result }}" == "success" ]]; then
 
             if [[ "${{ needs.build-config.outputs.is-release }}" == "true" ]]; then
               if [[ "${{ needs.docker-build.result }}" == "success" && \
                     "${{ needs.create-github-release.result }}" == "success" ]]; then
-                echo "## 🎉 RELEASE SUCCESSFUL!" >> pipeline-summary.md
+                echo "## 🎉 MULTI-PLATFORM RELEASE SUCCESSFUL!" >> pipeline-summary.md
                 echo "" >> pipeline-summary.md
                 echo "### 🚀 Harbor ${{ needs.build-config.outputs.version }} Released!" >> pipeline-summary.md
                 echo "- ✅ All tests passed" >> pipeline-summary.md
-                echo "- ✅ Docker images built and published" >> pipeline-summary.md
+                echo "- ✅ Multi-architecture Docker images built and published" >> pipeline-summary.md
                 echo "- ✅ Security scans completed" >> pipeline-summary.md
                 echo "- ✅ GitHub release created" >> pipeline-summary.md
                 echo "" >> pipeline-summary.md
+                echo "### 🏗️ Platform Support:" >> pipeline-summary.md
+                echo "Built for: ${{ needs.build-config.outputs.platforms }}" >> pipeline-summary.md
+                echo "Platforms tested: ${{ needs.docker-build.outputs.platforms-built }}" >> pipeline-summary.md
+                echo "" >> pipeline-summary.md
                 echo "### 📦 Published Images:" >> pipeline-summary.md
-                echo "- \`ghcr.io/deusextaco/harbor:${{ needs.build-config.outputs.version }}\`" >> pipeline-summary.md
-                echo "- \`dextaco/harbor:${{ needs.build-config.outputs.version }}\`" >> pipeline-summary.md
+                echo "- \`ghcr.io/deusextaco/harbor:${{ needs.build-config.outputs.version }}\` (multi-platform)" >> pipeline-summary.md
+                echo "- \`dextaco/harbor:${{ needs.build-config.outputs.version }}\` (multi-platform)" >> pipeline-summary.md
                 echo "" >> pipeline-summary.md
                 echo "### 🎯 Release Details:" >> pipeline-summary.md
                 echo "- **Version**: ${{ needs.build-config.outputs.version }}" >> pipeline-summary.md
                 echo "- **Milestone**: ${{ needs.build-config.outputs.milestone }}" >> pipeline-summary.md
                 echo "- **Type**: ${{ needs.build-config.outputs.is-prerelease == 'true' && 'Pre-release' || 'Stable' }}" >> pipeline-summary.md
+                echo "- **Platforms**: ${{ needs.build-config.outputs.platforms }}" >> pipeline-summary.md
+                echo "- **Build Mode**: ${{ needs.build-config.outputs.build-mode }}" >> pipeline-summary.md
                 if [[ "${{ needs.create-github-release.outputs.release-url }}" != "" ]]; then
                   echo "- **Release Notes**: ${{ needs.create-github-release.outputs.release-url }}" >> pipeline-summary.md
                 fi
@@ -423,12 +467,17 @@ jobs:
                 echo "Release creation failed - check the logs above." >> pipeline-summary.md
               fi
             else
-              echo "## ✅ BUILD SUCCESSFUL!" >> pipeline-summary.md
+              echo "## ✅ MULTI-PLATFORM BUILD SUCCESSFUL!" >> pipeline-summary.md
               echo "" >> pipeline-summary.md
               echo "### 🎉 All checks passed!" >> pipeline-summary.md
               if [[ "${{ needs.docker-build.result }}" == "success" ]]; then
-                echo "- ✅ Docker images built and published" >> pipeline-summary.md
-                echo "- ✅ Available for testing and deployment" >> pipeline-summary.md
+                echo "- ✅ Multi-architecture Docker images built and published" >> pipeline-summary.md
+                echo "- ✅ Available for testing and deployment on all supported platforms" >> pipeline-summary.md
+                echo "" >> pipeline-summary.md
+                echo "### 🏗️ Platform Details:" >> pipeline-summary.md
+                echo "- **Built For**: ${{ needs.build-config.outputs.platforms }}" >> pipeline-summary.md
+                echo "- **Tested On**: ${{ needs.docker-build.outputs.platforms-built }}" >> pipeline-summary.md
+                echo "- **Build Mode**: ${{ needs.build-config.outputs.build-mode }}" >> pipeline-summary.md
               fi
             fi
           else
@@ -449,40 +498,51 @@ jobs:
           if [[ "${{ needs.build-config.outputs.is-release }}" == "true" ]]; then
             if [[ "${{ needs.docker-build.result }}" == "success" && \
                   "${{ needs.create-github-release.result }}" == "success" ]]; then
-              echo "- 🎉 Release is complete and ready for use!" >> pipeline-summary.md
+              echo "- 🎉 Multi-platform release is complete and ready for use!" >> pipeline-summary.md
               echo "- 📢 Announce the release to the community" >> pipeline-summary.md
-              echo "- 📝 Update documentation if needed" >> pipeline-summary.md
+              echo "- 🥧 Test on Raspberry Pi devices for ARM validation" >> pipeline-summary.md
+              echo "- 📱 Update platform compatibility documentation" >> pipeline-summary.md
             else
               echo "- 🔧 Fix release issues and re-tag if necessary" >> pipeline-summary.md
-              echo "- 📝 Check workflow logs for specific errors" >> pipeline-summary.md
+              echo "- 🔍 Check workflow logs for specific errors" >> pipeline-summary.md
             fi
           elif [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "- 📝 Review any failed checks above" >> pipeline-summary.md
+            echo "- 🔍 Review any failed checks above" >> pipeline-summary.md
             echo "- 🔧 Fix issues and push new commits" >> pipeline-summary.md
             echo "- ✅ Merge when all checks pass" >> pipeline-summary.md
           elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
             if [[ "${{ needs.docker-build.result }}" == "success" ]]; then
-              echo "- ✅ New images are available for deployment" >> pipeline-summary.md
+              echo "- ✅ New multi-platform images are available for deployment" >> pipeline-summary.md
               echo "- 🔍 Review security scan results if needed" >> pipeline-summary.md
               echo "- 📦 Update deployment configs with new image tags" >> pipeline-summary.md
+              echo "- 🥧 Test on ARM devices to validate cross-platform compatibility" >> pipeline-summary.md
             else
               echo "- 🔧 Fix build issues before deployment" >> pipeline-summary.md
             fi
           fi
 
           echo "" >> pipeline-summary.md
-          echo "## 🗂️ Harbor Development Status" >> pipeline-summary.md
+          echo "## 🗔️ Harbor Development Status" >> pipeline-summary.md
           echo "- **Version**: ${{ needs.build-config.outputs.version }}" >> pipeline-summary.md
           echo "- **Milestone**: ${{ needs.build-config.outputs.milestone }} (Foundation Phase)" >> pipeline-summary.md
-          echo "- **Current Focus**: Building core infrastructure and CI/CD pipeline" >> pipeline-summary.md
+          echo "- **Platform Support**: ${{ needs.build-config.outputs.platforms }}" >> pipeline-summary.md
+          echo "- **Current Focus**: Multi-architecture foundation and CI/CD pipeline" >> pipeline-summary.md
           echo "- **Next Milestone**: M1 (Container Discovery & Registry Integration)" >> pipeline-summary.md
+          echo "" >> pipeline-summary.md
+          echo "## 🏗️ Architecture Support" >> pipeline-summary.md
+          echo "Harbor now runs natively on:" >> pipeline-summary.md
+          echo "- **Intel/AMD PCs**: Full performance with all features" >> pipeline-summary.md
+          echo "- **Apple Silicon Macs**: Native ARM64 performance" >> pipeline-summary.md
+          echo "- **Modern ARM Servers**: Optimized for ARM64 cloud instances" >> pipeline-summary.md
+          echo "- **Raspberry Pi 4**: Resource-optimized ARM64 builds" >> pipeline-summary.md
+          echo "- **Raspberry Pi 3**: Memory-optimized ARMv7 builds" >> pipeline-summary.md
 
           cat pipeline-summary.md
 
       - name: Upload pipeline summary
         uses: actions/upload-artifact@v4
         with:
-          name: pipeline-summary-${{ github.run_number }}-${{ github.run_attempt }}
+          name: pipeline-summary-multiarch-${{ github.run_number }}-${{ github.run_attempt }}
           path: pipeline-summary.md
           retention-days: 30
 
@@ -494,21 +554,30 @@ jobs:
             if [[ "${{ needs.build-config.outputs.is-release }}" == "true" ]]; then
               if [[ "${{ needs.docker-build.result }}" == "success" && \
                     "${{ needs.create-github-release.result }}" == "success" ]]; then
-                echo "🎉 Harbor ${{ needs.build-config.outputs.version }} released successfully!"
+                echo "🎉 Harbor ${{ needs.build-config.outputs.version }} multi-platform release successful!"
+                echo ""
+                echo "🏗️ Platform Support: ${{ needs.build-config.outputs.platforms }}"
                 echo ""
                 echo "📦 Docker Images:"
                 echo "- ghcr.io/deusextaco/harbor:${{ needs.build-config.outputs.version }}"
                 echo "- dextaco/harbor:${{ needs.build-config.outputs.version }}"
                 echo ""
                 echo "🔗 Release URL: ${{ needs.create-github-release.outputs.release-url }}"
+                echo ""
+                echo "🥧 ARM Testing:"
+                echo "- Raspberry Pi users can now use Harbor natively!"
+                echo "- Apple Silicon Macs get native ARM64 performance"
+                echo "- ARM cloud instances supported"
               else
-                echo "❌ Release creation failed!"
+                echo "❌ Multi-platform release creation failed!"
                 exit 1
               fi
             else
-              echo "✅ Harbor CI/CD Pipeline completed successfully!"
+              echo "✅ Harbor Multi-Platform CI/CD Pipeline completed successfully!"
               if [ "${{ needs.docker-build.result }}" == "success" ]; then
-                echo "🐳 New Docker images published"
+                echo "🏗️ New multi-architecture Docker images published"
+                echo "📱 Platform support: ${{ needs.build-config.outputs.platforms }}"
+                echo "🧪 Platform testing: ${{ needs.docker-build.outputs.platforms-built }}"
               fi
             fi
           else

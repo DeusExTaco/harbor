@@ -1,0 +1,157 @@
+# Harbor Container Updater - Raspberry Pi Optimized Deployment
+# examples/home-lab/raspberry-pi/docker-compose.yml
+# Optimized for ARMv7 (Pi 3) and ARM64 (Pi 4) with resource constraints
+
+version: '3.8'
+
+services:
+  harbor:
+    image: ghcr.io/deusextaco/harbor:latest
+    container_name: harbor
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - harbor_data:/app/data
+      - harbor_logs:/app/logs
+      - ./config:/app/config:ro  # Optional: custom configuration
+    environment:
+      # Core settings optimized for Raspberry Pi
+      - HARBOR_MODE=homelab
+      - HARBOR_TIMEZONE=${TIMEZONE:-UTC}
+
+      # Performance optimizations for ARM
+      - HARBOR_MAX_WORKERS=1              # Single worker for Pi
+      - MAX_CONCURRENT_UPDATES=1          # One update at a time
+      - DATABASE_POOL_SIZE=3              # Smaller connection pool
+      - LOG_RETENTION_DAYS=7              # Less storage usage
+      - REGISTRY_CACHE_TTL=7200           # Longer cache for slower network
+      - ENABLE_METRICS=false              # Reduce overhead
+
+      # Memory optimizations
+      - PYTHONOPTIMIZE=1                  # Enable Python optimizations
+      - MALLOC_TRIM_THRESHOLD_=100000     # Aggressive memory trimming
+
+      # Logging optimizations
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=text                   # Simpler than JSON
+
+      # Update behavior optimized for Pi
+      - DEFAULT_CHECK_INTERVAL_SECONDS=43200  # Check twice daily
+      - DEFAULT_UPDATE_TIME=03:00
+      - UPDATE_TIMEOUT_SECONDS=900        # Longer timeout for slower Pi
+      - PULL_TIMEOUT_SECONDS=1800         # Longer pull timeout
+
+      # Cleanup settings for limited storage
+      - ENABLE_AUTO_CLEANUP=true
+      - CLEANUP_KEEP_IMAGES=1             # Keep only 1 old image
+      - CLEANUP_DELAY_HOURS=12            # Cleanup sooner
+
+      # Network optimizations
+      - REGISTRY_TIMEOUT=60               # Longer timeout for Pi network
+      - REGISTRY_RETRY_COUNT=5            # More retries for unstable connections
+
+      # Disable resource-intensive features
+      - ENABLE_GETTING_STARTED=true
+      - ENABLE_SIMPLE_MODE=true
+      - TELEMETRY_ENABLED=false           # Privacy + performance
+    labels:
+      - "harbor.exclude=true"
+      - "harbor.platform=raspberry-pi"
+      - "harbor.optimization=arm-homelab"
+    deploy:
+      resources:
+        limits:
+          memory: 256M                    # Conservative memory limit
+          cpus: '0.5'                     # Half CPU for other services
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+    healthcheck:
+      test: ["CMD", "python", "scripts/health_check.py"]
+      interval: 60s                       # Less frequent checks
+      timeout: 15s                        # Longer timeout
+      retries: 3
+      start_period: 180s                  # Longer startup time
+
+  # Optional: Lightweight monitoring for Pi
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: harbor-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'    # Shorter retention
+      - '--storage.tsdb.retention.size=256MB' # Size limit
+      - '--web.enable-lifecycle'
+      - '--storage.tsdb.wal-compression'      # Enable compression
+    volumes:
+      - ./prometheus/prometheus-pi.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+    profiles:
+      - monitoring
+    labels:
+      - "harbor.exclude=true"
+
+  # Optional: Lightweight log viewer
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: harbor-logs
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "8888:8080"
+    environment:
+      - DOZZLE_NO_ANALYTICS=true
+      - DOZZLE_FILTER=name=harbor
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.1'
+    profiles:
+      - logs
+    labels:
+      - "harbor.exclude=true"
+
+volumes:
+  harbor_data:
+    driver: local
+  harbor_logs:
+    driver: local
+  prometheus_data:
+    driver: local
+
+# Networks optimized for Pi
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: 1500
+
+# Include platform detection helper
+x-platform-info: &platform-info
+  # This compose file is optimized for:
+  # - Raspberry Pi 3 (ARMv7): Single worker, minimal resources
+  # - Raspberry Pi 4 (ARM64): Dual worker, balanced resources
+  # - Other ARM64: Standard ARM64 optimizations
+  #
+  # Harbor automatically detects the platform and applies optimizations.
+  # The environment variables above provide additional tuning for Pi hardware.
+  #
+  # To start with monitoring: docker-compose --profile monitoring up -d
+  # To start with logs viewer: docker-compose --profile logs up -d
+  # To start everything: docker-compose --profile monitoring --profile logs up -d
