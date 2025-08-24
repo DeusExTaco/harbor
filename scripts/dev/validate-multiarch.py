@@ -8,12 +8,10 @@ multi-architecture builds and testing.
 Following Harbor Project Structure from foundational documents.
 """
 
-import json
 import platform
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Any
 
 
 class MultiArchValidator:
@@ -23,8 +21,8 @@ class MultiArchValidator:
         self.host_arch = platform.machine().lower()
         self.host_os = platform.system()
         self.project_root = Path(__file__).parent.parent.parent
-        self.issues: List[str] = []
-        self.warnings: List[str] = []
+        self.issues: list[str] = []
+        self.warnings: list[str] = []
 
     def validate_docker_setup(self) -> bool:
         """Validate Docker and buildx setup."""
@@ -32,8 +30,9 @@ class MultiArchValidator:
 
         # Check Docker availability
         try:
-            result = subprocess.run(['docker', '--version'],
-                                    capture_output=True, text=True, check=True)
+            result = subprocess.run(
+                ["docker", "--version"], capture_output=True, text=True, check=True
+            )
             docker_version = result.stdout.strip()
             print(f"   ✅ Docker: {docker_version}")
         except (subprocess.CalledProcessError, FileNotFoundError):
@@ -42,8 +41,12 @@ class MultiArchValidator:
 
         # Check Docker buildx
         try:
-            result = subprocess.run(['docker', 'buildx', 'version'],
-                                    capture_output=True, text=True, check=True)
+            result = subprocess.run(
+                ["docker", "buildx", "version"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
             buildx_version = result.stdout.strip()
             print(f"   ✅ Buildx: {buildx_version}")
         except subprocess.CalledProcessError:
@@ -52,10 +55,11 @@ class MultiArchValidator:
 
         # Check buildx builders
         try:
-            result = subprocess.run(['docker', 'buildx', 'ls'],
-                                    capture_output=True, text=True, check=True)
+            result = subprocess.run(
+                ["docker", "buildx", "ls"], capture_output=True, text=True, check=True
+            )
             builders = result.stdout
-            if 'linux/amd64' in builders and 'linux/arm64' in builders:
+            if "linux/amd64" in builders and "linux/arm64" in builders:
                 print("   ✅ Multi-platform builders available")
             else:
                 self.warnings.append("Multi-platform builders may need setup")
@@ -70,9 +74,21 @@ class MultiArchValidator:
 
         try:
             # Check if QEMU emulation is registered
-            result = subprocess.run(['docker', 'run', '--rm', '--privileged',
-                                     'multiarch/qemu-user-static', '--reset', '-p', 'yes'],
-                                    capture_output=True, text=True, timeout=30)
+            result = subprocess.run(
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--privileged",
+                    "multiarch/qemu-user-static",
+                    "--reset",
+                    "-p",
+                    "yes",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
             if result.returncode == 0:
                 print("   ✅ QEMU emulation configured")
                 return True
@@ -83,9 +99,13 @@ class MultiArchValidator:
 
         # Check what platforms are available
         try:
-            result = subprocess.run(['docker', 'buildx', 'inspect', '--bootstrap'],
-                                    capture_output=True, text=True, check=True)
-            if 'linux/arm64' in result.stdout and 'linux/arm' in result.stdout:
+            result = subprocess.run(
+                ["docker", "buildx", "inspect", "--bootstrap"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            if "linux/arm64" in result.stdout and "linux/arm" in result.stdout:
                 print("   ✅ ARM emulation appears available")
                 return True
         except subprocess.CalledProcessError:
@@ -98,12 +118,12 @@ class MultiArchValidator:
         print("📁 Validating Project Structure...")
 
         required_files = [
-            'deploy/docker/Dockerfile',
-            'deploy/docker/docker-compose.dev.yml',
-            'pyproject.toml',
-            'app/__init__.py',
-            'app/main.py',
-            'Makefile',
+            "deploy/docker/Dockerfile",
+            "deploy/docker/docker-compose.dev.yml",
+            "pyproject.toml",
+            "app/__init__.py",
+            "app/main.py",
+            "Makefile",
         ]
 
         missing_files = []
@@ -125,8 +145,8 @@ class MultiArchValidator:
         print("⚙️ Validating Platform Configurations...")
 
         config_files = [
-            'config/homelab.yaml',
-            'examples/home-lab/raspberry-pi/docker-compose.yml',
+            "config/homelab.yaml",
+            "examples/home-lab/raspberry-pi/docker-compose.yml",
         ]
 
         for config_file in config_files:
@@ -142,20 +162,20 @@ class MultiArchValidator:
         """Provide host-specific recommendations."""
         print(f"💡 Platform-Specific Recommendations for {self.host_arch}:")
 
-        if self.host_arch in ['x86_64', 'amd64']:
+        if self.host_arch in ["x86_64", "amd64"]:
             print("   🖥️ AMD64 Host:")
             print("     • Excellent for multi-architecture development")
             print("     • Can build and test all target platforms")
             print("     • QEMU emulation handles ARM builds well")
             print("     • Use 'make build-multiarch' for complete testing")
 
-        elif self.host_arch in ['aarch64', 'arm64']:
+        elif self.host_arch in ["aarch64", "arm64"]:
             print("   🎯 ARM64 Host:")
             print("     • Native ARM64 builds with excellent performance")
             print("     • AMD64 builds work via emulation")
             print("     • ARMv7 builds work via emulation")
 
-            if self.host_os == 'Darwin':
+            if self.host_os == "Darwin":
                 print("     🍎 Apple Silicon specific:")
                 print("       - Ensure Docker Desktop uses ARM64 mode")
                 print("       - Native performance for ARM64 builds")
@@ -165,7 +185,7 @@ class MultiArchValidator:
                 print("       - Great for ARM server/Pi 4 development")
                 print("       - Test ARM optimizations natively")
 
-        elif self.host_arch.startswith('arm'):
+        elif self.host_arch.startswith("arm"):
             print("   🥧 ARMv7 Host (Raspberry Pi 3?):")
             print("     • Native ARMv7 builds")
             print("     • Cross-compilation may be slow")
@@ -182,9 +202,9 @@ class MultiArchValidator:
         print("🔄 Validating CI/CD Configuration...")
 
         ci_files = [
-            '.github/workflows/ci-cd.yml',
-            '.github/workflows/docker-build.yml',
-            '.github/workflows/test.yml',
+            ".github/workflows/ci-cd.yml",
+            ".github/workflows/docker-build.yml",
+            ".github/workflows/test.yml",
         ]
 
         for ci_file in ci_files:
@@ -193,10 +213,10 @@ class MultiArchValidator:
                 print(f"   ✅ {ci_file}")
 
                 # Check if file contains multi-arch configuration
-                with open(full_path, 'r') as f:
+                with open(full_path) as f:
                     content = f.read()
-                    if 'linux/arm64' in content and 'linux/arm/v7' in content:
-                        print(f"     ✅ Multi-architecture support detected")
+                    if "linux/arm64" in content and "linux/arm/v7" in content:
+                        print("     ✅ Multi-architecture support detected")
                     else:
                         self.warnings.append(f"{ci_file} may not support multi-arch")
             else:
@@ -229,7 +249,7 @@ class MultiArchValidator:
                     all_passed = False
                 print("")
             except Exception as e:
-                self.issues.append(f"Validation error: {str(e)}")
+                self.issues.append(f"Validation error: {e!s}")
                 all_passed = False
                 print("")
 

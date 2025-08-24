@@ -107,7 +107,7 @@ jobs:
             echo "is-release=true" >> $GITHUB_OUTPUT
             echo "build-mode=production" >> $GITHUB_OUTPUT
             echo "🏷️ Tag release - production build with full multi-arch support"
-            
+
           elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
             # Main branch - production build with all platforms
             echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:latest,${{ env.REGISTRY_IMAGE_DOCKERHUB }}:$VERSION" >> $GITHUB_OUTPUT
@@ -116,7 +116,7 @@ jobs:
             echo "is-release=false" >> $GITHUB_OUTPUT
             echo "build-mode=production" >> $GITHUB_OUTPUT
             echo "📦 Main branch - production build with full multi-arch support"
-            
+
           elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
             # Develop branch - development build, amd64 only for speed
             echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:develop,${{ env.REGISTRY_IMAGE_DOCKERHUB }}:$VERSION-dev" >> $GITHUB_OUTPUT
@@ -126,7 +126,7 @@ jobs:
             echo "build-mode=development" >> $GITHUB_OUTPUT
             echo "platforms=linux/amd64" >> $GITHUB_OUTPUT  # Override to amd64 only for dev speed
             echo "🔧 Develop branch - development build (amd64 only for speed)"
-            
+
           else
             # Feature branches - development build, amd64 only
             BRANCH_NAME=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
@@ -231,7 +231,7 @@ jobs:
           echo "🏷️ Docker Hub Tags:"
           echo "${{ needs.build-config.outputs.docker-tags }}" | tr ',' '\n' | sed 's/^/   /'
           echo ""
-          echo "🏷️ GHCR Tags:" 
+          echo "🏷️ GHCR Tags:"
           echo "${{ needs.build-config.outputs.ghcr-tags }}" | tr ',' '\n' | sed 's/^/   /'
           echo ""
           echo "🎯 Platform Optimization Summary:"
@@ -277,14 +277,14 @@ jobs:
       - name: Verify multi-architecture manifests
         run: |
           echo "🔍 Verifying multi-architecture manifests..."
-          
+
           # Check GHCR manifest
           GHCR_TAG=$(echo "${{ needs.build-config.outputs.ghcr-tags }}" | cut -d',' -f1)
           echo "📦 Checking GHCR manifest: $GHCR_TAG"
-          
+
           if docker buildx imagetools inspect $GHCR_TAG; then
             echo "✅ GHCR multi-architecture manifest verified"
-            
+
             # Extract platform information
             echo ""
             echo "🏗️ Available platforms in GHCR:"
@@ -308,13 +308,13 @@ jobs:
           else
             echo "⚠️  GHCR manifest check failed"
           fi
-          
+
           # Check Docker Hub manifest
           if [ -n "${{ env.REGISTRY_IMAGE_DOCKERHUB }}" ]; then
             DOCKERHUB_TAG=$(echo "${{ needs.build-config.outputs.docker-tags }}" | cut -d',' -f1)
             echo ""
             echo "📦 Checking Docker Hub manifest: $DOCKERHUB_TAG"
-            
+
             if docker buildx imagetools inspect $DOCKERHUB_TAG; then
               echo "✅ Docker Hub multi-architecture manifest verified"
             else
@@ -327,7 +327,7 @@ jobs:
         id: build-result
         run: |
           echo "platforms-built=${{ needs.build-config.outputs.platforms }}" >> $GITHUB_OUTPUT
-          
+
           # Create manifest info for later use
           GHCR_TAG=$(echo "${{ needs.build-config.outputs.ghcr-tags }}" | cut -d',' -f1)
           MANIFEST_INFO=$(docker buildx imagetools inspect $GHCR_TAG --format '{{json .}}' 2>/dev/null || echo '{}')
@@ -348,10 +348,10 @@ jobs:
       - name: Test AMD64 Harbor image with real startup
         run: |
           echo "🧪 Testing AMD64 Harbor image with full container startup..."
-          
+
           # Get the first GHCR tag
           IMAGE_TAG=$(echo "${{ needs.build-config.outputs.ghcr-tags }}" | cut -d',' -f1)
-          
+
           # Start container with AMD64 platform
           echo "🚀 Starting AMD64 container..."
           docker run -d \
@@ -380,7 +380,7 @@ jobs:
 
           # Test endpoints
           echo "🔍 Testing endpoints..."
-          
+
           # Health check
           HEALTH=$(curl -s http://localhost:8090/healthz)
           if echo $HEALTH | grep -q '"status":"healthy"'; then
@@ -422,7 +422,7 @@ jobs:
           # Cleanup
           docker stop harbor-test-amd64
           docker rm harbor-test-amd64
-          
+
           echo "✅ AMD64 platform test completed successfully"
 
   test-arm64:
@@ -442,9 +442,9 @@ jobs:
       - name: Test ARM64 Harbor image with emulation
         run: |
           echo "🧪 Testing ARM64 Harbor image (emulated on x86_64)..."
-          
+
           IMAGE_TAG=$(echo "${{ needs.build-config.outputs.ghcr-tags }}" | cut -d',' -f1)
-          
+
           # Start container with ARM64 platform
           echo "🚀 Starting ARM64 container (emulated)..."
           docker run -d \
@@ -477,7 +477,7 @@ jobs:
 
           # Test basic functionality
           echo "🔍 Testing ARM64 endpoints..."
-          
+
           HEALTH=$(curl -s http://localhost:8091/healthz)
           if echo $HEALTH | grep -q '"status":"healthy"'; then
             echo "✅ ARM64 health endpoint working"
@@ -502,7 +502,7 @@ print(f'Max Workers: {os.getenv(\"HARBOR_MAX_WORKERS\", \"auto\")}')
           # Cleanup
           docker stop harbor-test-arm64
           docker rm harbor-test-arm64
-          
+
           echo "✅ ARM64 platform test completed successfully"
 
   test-armv7:
@@ -522,9 +522,9 @@ print(f'Max Workers: {os.getenv(\"HARBOR_MAX_WORKERS\", \"auto\")}')
       - name: Test ARMv7 Harbor image with emulation
         run: |
           echo "🧪 Testing ARMv7 Harbor image (emulated - Raspberry Pi 3 simulation)..."
-          
+
           IMAGE_TAG=$(echo "${{ needs.build-config.outputs.ghcr-tags }}" | cut -d',' -f1)
-          
+
           # Start container with ARMv7 platform and Pi 3 optimizations
           echo "🚀 Starting ARMv7 container (emulated with Pi 3 optimizations)..."
           docker run -d \
@@ -561,7 +561,7 @@ print(f'Max Workers: {os.getenv(\"HARBOR_MAX_WORKERS\", \"auto\")}')
 
           # Test basic functionality
           echo "🔍 Testing ARMv7 endpoints..."
-          
+
           HEALTH=$(curl -s http://localhost:8092/healthz)
           if echo $HEALTH | grep -q '"status":"healthy"'; then
             echo "✅ ARMv7 health endpoint working"
@@ -585,7 +585,7 @@ print('✅ ARMv7 optimizations verified')
           echo "📊 ARMv7 container performance (emulated, optimized for Pi 3):"
           STATS=$(docker stats --no-stream --format "{{.CPUPerc}}\t{{.MemUsage}}" harbor-test-armv7)
           echo "   $STATS"
-          
+
           # Verify memory usage is optimized
           MEMORY_MB=$(echo $STATS | awk '{print $2}' | sed 's/MiB.*//')
           if [ -n "$MEMORY_MB" ] && [ "$MEMORY_MB" -lt 200 ]; then
@@ -597,7 +597,7 @@ print('✅ ARMv7 optimizations verified')
           # Cleanup
           docker stop harbor-test-armv7
           docker rm harbor-test-armv7
-          
+
           echo "✅ ARMv7 platform test completed successfully"
 
   # =============================================================================
@@ -626,10 +626,10 @@ print('✅ ARMv7 optimizations verified')
       - name: Create platform-specific tags
         run: |
           echo "🏷️ Creating platform-specific tags for easier targeting..."
-          
+
           BASE_TAG=$(echo "${{ needs.build-config.outputs.ghcr-tags }}" | cut -d',' -f1)
           VERSION="${{ needs.build-config.outputs.harbor-version }}"
-          
+
           # Create platform-specific tags by copying from the multi-platform manifest
           IFS=',' read -ra PLATFORM_ARRAY <<< "${{ needs.build-config.outputs.platforms }}"
           for platform in "${PLATFORM_ARRAY[@]}"; do
@@ -667,12 +667,12 @@ print('✅ ARMv7 optimizations verified')
       - name: Multi-platform integration validation
         run: |
           echo "🧪 Multi-platform integration test..."
-          
+
           IMAGE_TAG=$(echo "${{ needs.build-config.outputs.ghcr-tags }}" | cut -d',' -f1)
-          
+
           # Test that the multi-platform manifest works correctly
           echo "🔍 Testing multi-platform manifest selection..."
-          
+
           # Start container and let Docker auto-select platform
           docker run -d \
             --name harbor-integration-test \
@@ -701,7 +701,7 @@ print('✅ ARMv7 optimizations verified')
           # Cleanup
           docker stop harbor-integration-test
           docker rm harbor-integration-test
-          
+
           echo "✅ Multi-platform integration test completed"
 
   # =============================================================================
@@ -729,12 +729,12 @@ print('✅ ARMv7 optimizations verified')
           ARMV7_RESULT="${{ needs.test-armv7.result }}"
           INTEGRATION_RESULT="${{ needs.integration-test.result }}"
           PUBLISH_RESULT="${{ needs.publish-platform-tags.result }}"
-          
+
           # Count successful platform builds
           SUCCESSFUL_PLATFORMS=""
           FAILED_PLATFORMS=""
           TESTED_PLATFORMS=""
-          
+
           if [[ "$BUILD_RESULT" == "success" ]]; then
             # Check each platform
             if [[ "$AMD64_RESULT" == "success" ]]; then
@@ -746,7 +746,7 @@ print('✅ ARMv7 optimizations verified')
               FAILED_PLATFORMS="${FAILED_PLATFORMS},linux/amd64"
               TESTED_PLATFORMS="${TESTED_PLATFORMS},AMD64❌"
             fi
-            
+
             if [[ "$ARM64_RESULT" == "success" ]]; then
               SUCCESSFUL_PLATFORMS="${SUCCESSFUL_PLATFORMS},linux/arm64"
               TESTED_PLATFORMS="${TESTED_PLATFORMS},ARM64✅"
@@ -756,7 +756,7 @@ print('✅ ARMv7 optimizations verified')
               FAILED_PLATFORMS="${FAILED_PLATFORMS},linux/arm64"
               TESTED_PLATFORMS="${TESTED_PLATFORMS},ARM64❌"
             fi
-            
+
             if [[ "$ARMV7_RESULT" == "success" ]]; then
               SUCCESSFUL_PLATFORMS="${SUCCESSFUL_PLATFORMS},linux/arm/v7"
               TESTED_PLATFORMS="${TESTED_PLATFORMS},ARMv7✅"
@@ -767,12 +767,12 @@ print('✅ ARMv7 optimizations verified')
               TESTED_PLATFORMS="${TESTED_PLATFORMS},ARMv7❌"
             fi
           fi
-          
+
           # Clean up leading commas
           SUCCESSFUL_PLATFORMS=$(echo $SUCCESSFUL_PLATFORMS | sed 's/^,//')
           FAILED_PLATFORMS=$(echo $FAILED_PLATFORMS | sed 's/^,//')
           TESTED_PLATFORMS=$(echo $TESTED_PLATFORMS | sed 's/^,//')
-          
+
           # Determine overall success
           if [[ "$BUILD_RESULT" == "success" && "$AMD64_RESULT" == "success" && "$INTEGRATION_RESULT" == "success" ]]; then
             echo "build-successful=true" >> $GITHUB_OUTPUT
@@ -790,7 +790,7 @@ print('✅ ARMv7 optimizations verified')
           else
             echo "image-tags=" >> $GITHUB_OUTPUT
           fi
-          
+
           echo "platforms-built=$SUCCESSFUL_PLATFORMS" >> $GITHUB_OUTPUT
 
           # Generate comprehensive multi-platform summary
@@ -804,15 +804,15 @@ print('✅ ARMv7 optimizations verified')
           echo "📄 Dockerfile: ${{ needs.build-config.outputs.dockerfile }}"
           echo "🔗 Commit: ${{ github.sha }}"
           echo ""
-          
+
           echo "🏗️ Platform Build & Test Results:"
           echo "   🖥️  AMD64: $AMD64_RESULT"
-          echo "   🍎  ARM64: $ARM64_RESULT" 
+          echo "   🍎  ARM64: $ARM64_RESULT"
           echo "   🥧  ARMv7: $ARMV7_RESULT"
           echo "   🔄  Integration: $INTEGRATION_RESULT"
           echo "   📦  Publishing: $PUBLISH_RESULT"
           echo ""
-          
+
           if [[ -n "$SUCCESSFUL_PLATFORMS" ]]; then
             echo "✅ Successfully Built Platforms:"
             IFS=',' read -ra SUCCESS_ARRAY <<< "$SUCCESSFUL_PLATFORMS"
@@ -831,7 +831,7 @@ print('✅ ARMv7 optimizations verified')
             done
             echo ""
           fi
-          
+
           if [[ -n "$FAILED_PLATFORMS" ]]; then
             echo "❌ Failed Platform Builds:"
             echo "$FAILED_PLATFORMS" | tr ',' '\n' | sed 's/^/   /'
@@ -842,7 +842,7 @@ print('✅ ARMv7 optimizations verified')
             echo "📦 Published Multi-Platform Images:"
             echo "${{ needs.build-config.outputs.docker-tags }},${{ needs.build-config.outputs.ghcr-tags }}" | tr ',' '\n' | sed 's/^/   /'
             echo ""
-            
+
             if [[ "$PUBLISH_RESULT" == "success" ]]; then
               echo "📱 Platform-Specific Tags (for manual architecture selection):"
               VERSION="${{ needs.build-config.outputs.harbor-version }}"
@@ -851,7 +851,7 @@ print('✅ ARMv7 optimizations verified')
               echo "   🥧  ARMv7: ghcr.io/deusextaco/harbor:${VERSION}-armv7"
               echo ""
             fi
-            
+
             echo "🔗 Repository Links:"
             echo "   • https://hub.docker.com/r/dextaco/harbor"
             echo "   • https://github.com/DeusExTaco/harbor/pkgs/container/harbor"
@@ -859,7 +859,7 @@ print('✅ ARMv7 optimizations verified')
             echo "📱 Platform-Specific Usage Examples:"
             echo ""
             MAIN_TAG=$(echo "${{ needs.build-config.outputs.ghcr-tags }}" | cut -d',' -f1)
-            
+
             echo "🖥️  Intel/AMD Systems:"
             echo "   docker run -d -p 8080:8080 $MAIN_TAG"
             echo ""
@@ -882,7 +882,7 @@ print('✅ ARMv7 optimizations verified')
           echo ""
           echo "🏗️ Architecture Support Established:"
           echo "   ✅ Intel/AMD (x86_64) - Full performance baseline"
-          echo "   ✅ Apple Silicon - Native ARM64 performance"  
+          echo "   ✅ Apple Silicon - Native ARM64 performance"
           echo "   ✅ Modern ARM Servers - Optimized ARM64 builds"
           echo "   ✅ Raspberry Pi 4 - Resource-conscious ARM64"
           echo "   ✅ Raspberry Pi 3 - Memory-optimized ARMv7"
