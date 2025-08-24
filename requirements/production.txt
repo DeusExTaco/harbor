@@ -1,13 +1,75 @@
 # Harbor Container Updater - Production Dependencies
-# Additional dependencies for enterprise/production deployments
+# Additional dependencies for enterprise production deployments
+# Following Harbor architecture design from foundational documents
 
+# Include base requirements
 -r base.txt
 
-# Production database drivers
-psycopg2-binary>=2.9.0
+# =============================================================================
+# Production Database Drivers
+# =============================================================================
+psycopg2-binary>=2.9.0,<3.0.0      # PostgreSQL driver (enterprise database)
 
-# Caching and sessions
-redis>=5.0.0
+# =============================================================================
+# Production Server
+# =============================================================================
+gunicorn>=21.2.0,<22.0.0           # Production WSGI server with worker management
 
-# Production WSGI server
-gunicorn>=21.2.0
+# =============================================================================
+# Caching and Sessions (Enterprise)
+# =============================================================================
+redis>=5.0.0,<6.0.0                # Redis for caching and session storage
+hiredis>=2.2.0,<3.0.0              # High-performance Redis client
+
+# =============================================================================
+# Monitoring and Observability
+# =============================================================================
+opentelemetry-api>=1.21.0,<2.0.0   # TODO: M7+ Distributed tracing
+opentelemetry-sdk>=1.21.0,<2.0.0   # TODO: M7+ Tracing implementation
+sentry-sdk>=1.40.0,<2.0.0          # TODO: M7+ Error tracking and monitoring
+
+# =============================================================================
+# Security Enhancements (Enterprise)
+# =============================================================================
+pyotp>=2.9.0,<3.0.0                # TODO: M7+ TOTP for MFA
+qrcode>=7.4.0,<8.0.0               # TODO: M7+ QR codes for MFA setup
+
+# =============================================================================
+# Enterprise Authentication (Future)
+# =============================================================================
+python-ldap>=3.4.0,<4.0.0          # TODO: M9+ LDAP authentication
+python-jose>=3.3.0,<4.0.0          # TODO: M9+ JWT token handling for SAML/OAuth
+
+# =============================================================================
+# Compliance and Audit (Enterprise)
+# =============================================================================
+# TODO: M9+ Compliance frameworks
+# cryptography already included in base requirements for encryption
+
+# =============================================================================
+# Performance Optimization
+# =============================================================================
+orjson>=3.9.0,<4.0.0               # Fast JSON serialization
+ujson>=5.8.0,<6.0.0                # Ultra-fast JSON parsing (fallback)
+
+# =============================================================================
+# Background Task Processing (Enterprise Scale)
+# =============================================================================
+celery>=5.3.0,<6.0.0               # TODO: M8+ Distributed task queue
+redis>=5.0.0,<6.0.0                # Required for Celery broker (already included above)
+
+# =============================================================================
+# Email Support (Enterprise Notifications)
+# =============================================================================
+aiosmtplib>=3.0.0,<4.0.0           # TODO: M7+ Async SMTP client
+email-validator>=2.1.0,<3.0.0      # TODO: M7+ Email address validation
+
+# =============================================================================
+# Webhook and Integration Support
+# =============================================================================
+pydantic[email]>=2.5.0,<3.0.0      # Enhanced validation for integrations
+
+# =============================================================================
+# Health Check Enhancements
+# =============================================================================
+aiofiles>=23.2.0,<24.0.0           # Async file I/O for log processing

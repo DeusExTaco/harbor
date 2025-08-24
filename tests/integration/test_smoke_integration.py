@@ -1,263 +1,117 @@
 """
-Integration Test Smoke Tests for Harbor Container Updater
+Smoke integration tests for Harbor Container Updater.
 
-These are temporary smoke tests to ensure the CI/CD pipeline passes
-during the M0 foundation phase. They will be replaced with real integration tests
-as we implement the application components.
-
-Purpose:
-- Verify pytest integration test setup is working
-- Ensure integration test directory structure is valid
-- Validate environment setup for integration testing
-- Test database connectivity preparation
-- Provide baseline for future component integration tests
+These tests verify basic functionality and infrastructure components
+without requiring Docker or external dependencies.
 """
 
 import os
 import tempfile
+import unittest
 from pathlib import Path
-from unittest.mock import patch
-
-import pytest
 
 
-class TestEnvironmentSetup:
-    """Test that the integration test environment is properly configured."""
+class TestSmokeIntegration(unittest.TestCase):
+    """Smoke tests for basic Harbor functionality"""
 
-    @pytest.mark.integration
-    def test_test_environment_variables(self) -> None:
-        """Test that test environment variables can be set and read."""
-        # Test setting and reading environment variables
-        test_var = "HARBOR_TEST_MODE"
-        test_value = "integration_testing"
+    def test_environment_variable_handling(self) -> None:
+        """Test that environment variables can be set and read"""
+        test_var = "HARBOR_TEST_VARIABLE"
+        test_value = "test_value_12345"
 
-        os.environ[test_var] = test_value
-        assert os.getenv(test_var) == test_value
+        # Clean up first
+        if test_var in os.environ:
+            del os.environ[test_var]
 
-        # Clean up
-        del os.environ[test_var]
+        try:
+            os.environ[test_var] = test_value
+            self.assertEqual(os.getenv(test_var), test_value)
+        finally:
+            # Cleanup
+            if test_var in os.environ:
+                del os.environ[test_var]
 
-    @pytest.mark.integration
-    def test_temporary_directory_creation(self) -> None:
-        """Test that we can create temporary directories for testing."""
+    def test_file_system_operations(self) -> None:
+        """Test basic file system operations work correctly"""
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            assert temp_path.exists()
-            assert temp_path.is_dir()
+            self.assertTrue(temp_path.exists())
+            self.assertTrue(temp_path.is_dir())
 
-            # Test creating files in temp directory
+            # Test file creation and reading
             test_file = temp_path / "test_file.txt"
             test_file.write_text("test content")
-            assert test_file.exists()
-            assert test_file.read_text() == "test content"
+            self.assertTrue(test_file.exists())
+            self.assertEqual(test_file.read_text(), "test content")
 
-    @pytest.mark.integration
-    def test_database_url_environment(self) -> None:
-        """Test database URL configuration for testing."""
-        # Test that we can set a test database URL
+    def test_database_url_configuration(self) -> None:
+        """Test database URL configuration handling"""
+        test_db_url = "sqlite:///test_harbor.db"
         original_db_url = os.getenv("DATABASE_URL")
-        test_db_url = "sqlite:///data/test.db"
 
-        os.environ["DATABASE_URL"] = test_db_url
-        assert os.getenv("DATABASE_URL") == test_db_url
-
-        # Restore original if it existed
-        if original_db_url:
-            os.environ["DATABASE_URL"] = original_db_url
-        elif "DATABASE_URL" in os.environ:
-            del os.environ["DATABASE_URL"]
-
-
-class TestApplicationBootstrap:
-    """Test application bootstrapping for integration tests."""
-
-    @pytest.mark.integration
-    def test_app_import_in_integration_context(self) -> None:
-        """Test that app modules can be imported in integration context."""
-        # This simulates importing the app in an integration test context
-        import app
-        import app.main
-
-        assert app is not None
-        assert app.main is not None
-
-    @pytest.mark.integration
-    def test_main_function_integration(self) -> None:
-        """Test main function in integration context."""
-        from app.main import main
-
-        # Capture stdout to avoid printing during tests
-        with patch("builtins.print") as mock_print:
-            main()
-
-        # Verify it was called
-        mock_print.assert_called()
-
-        # Check that expected output was printed - safe extraction
-        calls = []
-        for call in mock_print.call_args_list:
-            if call.args:
-                calls.append(str(call.args[0]))
-
-        all_output = " ".join(calls)
-        assert "Harbor Container Updater" in all_output
-
-    @pytest.mark.integration
-    def test_app_configuration_placeholder(self) -> None:
-        """Placeholder for app configuration testing."""
-        # TODO: M0 - Implement when configuration system is ready
-        # This will test loading configuration in integration context
-        assert True, "App configuration integration test placeholder"
-
-
-class TestFileSystemIntegration:
-    """Test file system operations needed for integration tests."""
-
-    @pytest.mark.integration
-    def test_data_directory_creation(self) -> None:
-        """Test creating data directories for testing."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir) / "data"
-            data_dir.mkdir(exist_ok=True)
-
-            assert data_dir.exists()
-            assert data_dir.is_dir()
-
-    @pytest.mark.integration
-    def test_logs_directory_creation(self) -> None:
-        """Test creating logs directories for testing."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            logs_dir = Path(temp_dir) / "logs"
-            logs_dir.mkdir(exist_ok=True)
-
-            assert logs_dir.exists()
-            assert logs_dir.is_dir()
-
-    @pytest.mark.integration
-    def test_config_file_handling(self) -> None:
-        """Test configuration file handling."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            config_file = Path(temp_dir) / "test_config.yaml"
-
-            # Test writing config
-            config_content = """
-mode: test
-database:
-  url: sqlite:///test.db
-logging:
-  level: DEBUG
-"""
-            config_file.write_text(config_content)
-            assert config_file.exists()
-
-            # Test reading config
-            content = config_file.read_text()
-            assert "mode: test" in content
-            assert "sqlite:///test.db" in content
-
-
-class TestDatabaseIntegrationPrep:
-    """Prepare for database integration testing."""
-
-    @pytest.mark.integration
-    def test_sqlite_connection_preparation(self) -> None:
-        """Test SQLite connection preparation for integration tests."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            db_path = Path(temp_dir) / "test.db"
-            db_url = f"sqlite:///{db_path}"
-
-            # Test that we can form a valid database URL
-            assert db_url.startswith("sqlite:///")
-            assert str(db_path) in db_url
-
-    @pytest.mark.integration
-    def test_database_environment_isolation(self) -> None:
-        """Test database environment isolation for tests."""
-        # Test that we can isolate database for testing
-        test_db_url = "sqlite:///data/integration_test.db"
-
-        with patch.dict(os.environ, {"DATABASE_URL": test_db_url}):
-            assert os.getenv("DATABASE_URL") == test_db_url
-
-    @pytest.mark.integration
-    def test_database_cleanup_preparation(self) -> None:
-        """Test database cleanup preparation."""
-        # Test that we can prepare for database cleanup
-        with tempfile.TemporaryDirectory() as temp_dir:
-            db_file = Path(temp_dir) / "test.db"
-
-            # Simulate creating a database file
-            db_file.touch()
-            assert db_file.exists()
-
-            # Simulate cleanup
-            db_file.unlink()
-            assert not db_file.exists()
-
-
-class TestHTTPClientPreparation:
-    """Prepare for HTTP client testing."""
-
-    @pytest.mark.integration
-    def test_http_client_imports(self) -> None:
-        """Test that HTTP client dependencies are available."""
         try:
-            import httpx  # noqa: F401
+            os.environ["DATABASE_URL"] = test_db_url
+            self.assertEqual(os.getenv("DATABASE_URL"), test_db_url)
+        finally:
+            # Restore original value
+            if original_db_url is not None:
+                os.environ["DATABASE_URL"] = original_db_url
+            elif "DATABASE_URL" in os.environ:
+                del os.environ["DATABASE_URL"]
 
-            http_client_available = True
-        except ImportError:
-            http_client_available = False
+    def test_harbor_config_import(self) -> None:
+        """Test that Harbor configuration modules can be imported"""
+        try:
+            import app.config  # noqa: F401
 
-        # For now, just verify import works or fails gracefully
-        # TODO: M0 - Implement actual HTTP client testing when FastAPI is set up
-        assert isinstance(http_client_available, bool)
+            # If we get here, import succeeded
+            self.assertTrue(True, "Harbor config module imported successfully")
+        except ImportError as e:
+            self.fail(f"Failed to import Harbor config module: {e}")
 
-    @pytest.mark.integration
-    def test_test_client_preparation(self) -> None:
-        """Prepare for FastAPI test client usage."""
-        # TODO: M0 - Implement when FastAPI app is created
-        # This will test creating a test client for the FastAPI app
-        assert True, "FastAPI test client preparation placeholder"
+    def test_harbor_main_import(self) -> None:
+        """Test that Harbor main application can be imported"""
+        try:
+            import app.main  # noqa: F401
 
+            # If we get here, import succeeded
+            self.assertTrue(True, "Harbor main module imported successfully")
+        except ImportError as e:
+            self.fail(f"Failed to import Harbor main module: {e}")
 
-# =============================================================================
-# Future Integration Test Placeholders
-# =============================================================================
+    def test_configuration_profiles_defined(self) -> None:
+        """Test that configuration profiles are properly defined"""
+        try:
+            from app.config import DeploymentProfile
 
+            # Check all expected profiles exist
+            expected_profiles = ["homelab", "development", "staging", "production"]
+            actual_profiles = [profile.value for profile in DeploymentProfile]
 
-class TestFutureIntegrations:
-    """Placeholder integration tests for future components."""
+            for expected in expected_profiles:
+                self.assertIn(
+                    expected, actual_profiles, f"Profile {expected} not found"
+                )
 
-    @pytest.mark.integration
-    def test_database_integration_placeholder(self) -> None:
-        """Placeholder for database integration tests."""
-        # TODO: M0 - Implement database integration tests
-        assert True, "Database integration tests will be implemented in M0"
+        except ImportError as e:
+            self.fail(f"Failed to import DeploymentProfile: {e}")
 
-    @pytest.mark.integration
-    def test_api_integration_placeholder(self) -> None:
-        """Placeholder for API integration tests."""
-        # TODO: M0 - Implement API integration tests
-        assert True, "API integration tests will be implemented in M0"
+    def test_fastapi_app_creation(self) -> None:
+        """Test that FastAPI application can be created"""
+        try:
+            from app.main import create_app
 
-    @pytest.mark.integration
-    def test_docker_integration_placeholder(self) -> None:
-        """Placeholder for Docker integration tests."""
-        # TODO: M1 - Implement Docker integration tests
-        assert True, "Docker integration tests will be implemented in M1"
+            app = create_app()
+            self.assertIsNotNone(app, "FastAPI app creation returned None")
 
-    @pytest.mark.integration
-    def test_registry_integration_placeholder(self) -> None:
-        """Placeholder for registry integration tests."""
-        # TODO: M1 - Implement registry integration tests
-        assert True, "Registry integration tests will be implemented in M1"
+            # Basic check that it's a FastAPI app
+            self.assertTrue(
+                hasattr(app, "openapi"), "Created app doesn't have FastAPI methods"
+            )
 
-    @pytest.mark.integration
-    def test_end_to_end_workflow_placeholder(self) -> None:
-        """Placeholder for end-to-end workflow tests."""
-        # TODO: M2 - Implement end-to-end integration tests
-        assert True, "End-to-end workflow tests will be implemented in M2"
+        except Exception as e:
+            self.fail(f"Failed to create FastAPI app: {e}")
 
 
 if __name__ == "__main__":
-    pytest.main([__file__])
+    unittest.main()

@@ -1,6 +1,6 @@
 # Basic Home Lab Example
 # Simple Harbor deployment for home labs
-version: '3.8'
+version: "3.8"
 
 services:
   harbor:

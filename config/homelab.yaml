@@ -1,0 +1,457 @@
+# Harbor Container Updater - Home Lab Configuration
+# Optimized for home lab environments with zero-config deployment
+# Following Harbor architecture design principles
+
+# =============================================================================
+# Deployment Profile
+# =============================================================================
+deployment:
+  profile: homelab
+  description: "Home lab optimized for ease of use and resource efficiency"
+  auto_setup: true # Enable automatic first-run setup
+  show_welcome: true # Show welcome message on startup
+
+# =============================================================================
+# Application Settings
+# =============================================================================
+app:
+  name: "Harbor Container Updater"
+  debug: false
+  host: "0.0.0.0"
+  port: 8080
+
+# =============================================================================
+# Database Configuration (SQLite for zero-config)
+# =============================================================================
+database:
+  type: sqlite
+  # URL auto-generated as: sqlite:///data/harbor.db
+  pool_size: 5
+  max_overflow: 2
+  pool_timeout: 30
+  echo_sql: false # Disable SQL logging for cleaner logs
+
+  # Home lab backup settings
+  backup_enabled: true
+  backup_retention_days: 7 # Keep 1 week of backups
+  backup_schedule: "0 2 * * *" # Daily at 2 AM
+
+# =============================================================================
+# Security Settings (Relaxed for home networks)
+# =============================================================================
+security:
+  # Network security
+  require_https: false # HTTP OK for internal networks
+  session_timeout_hours: 168 # 1 week (convenient for home use)
+  session_secure_cookies: false
+
+  # Authentication
+  api_key_required: false # Optional for home lab
+  password_min_length: 6 # Reasonable minimum
+  password_require_special: false
+
+  # Rate limiting (generous for home use)
+  api_rate_limit_per_hour: 1000
+
+  # Future features (disabled in v1.0)
+  mfa_enabled: false # TODO: M7+ Multi-factor authentication
+
+# =============================================================================
+# Container Update Settings (Conservative and safe)
+# =============================================================================
+updates:
+  # Scheduling
+  default_check_interval_seconds: 86400 # Daily checks
+  default_update_time: "03:00" # 3 AM updates (low usage time)
+  default_timezone: "UTC" # UTC for consistency
+
+  # Concurrency (conservative for home hardware)
+  max_concurrent_updates: 2 # Limit concurrent operations
+  update_delay_seconds: 5 # Brief delay between updates
+
+  # Safety settings
+  default_health_check_timeout: 60 # 1 minute health check
+  default_rollback_enabled: true # Always enable rollback
+  rollback_timeout_seconds: 300 # 5 minute rollback timeout
+
+  # Cleanup settings
+  default_cleanup_enabled: true # Clean up old images
+  default_cleanup_keep_images: 2 # Keep 2 previous versions
+  cleanup_delay_hours: 24 # Wait 24h before cleanup
+
+# =============================================================================
+# Docker Runtime Settings
+# =============================================================================
+docker:
+  # Connection
+  host: "unix:///var/run/docker.sock" # Direct socket (home lab default)
+  # host: "tcp://docker-socket-proxy:2375"  # Use this for socket proxy
+  timeout: 60 # API timeout
+
+  # Discovery
+  discovery_interval_seconds: 300 # Check every 5 minutes
+  include_stopped_containers: true # Include stopped containers
+
+  # Safety patterns
+  exclude_patterns:
+    - "harbor" # Exclude Harbor itself
+    - "*_backup" # Exclude backup containers
+    - "*_migrate" # Exclude migration containers
+    - "portainer*" # Exclude Portainer
+    - "watchtower*" # Exclude existing updaters
+
+# =============================================================================
+# Registry Settings (Public registries)
+# =============================================================================
+registry:
+  # Client settings
+  timeout_seconds: 30 # Registry request timeout
+  retry_count: 3 # Retry failed requests
+
+  # Caching (important for rate limits)
+  cache_ttl_seconds: 3600 # 1 hour cache
+  cache_size_mb: 50 # Cache size limit
+
+  # Rate limiting (respect Docker Hub limits)
+  rate_limit_calls_per_hour: 100 # Conservative limit
+
+# =============================================================================
+# Logging Settings (Simple for home lab)
+# =============================================================================
+logging:
+  level: INFO # Informational logging
+  format: text # Human-readable format
+
+  # File logging
+  to_file: true
+  # file_path: "logs/harbor.log"           # Auto-generated
+  rotation_size_mb: 10 # Rotate at 10MB
+  retention_days: 14 # Keep 2 weeks of logs
+
+  # Console logging
+  to_console: true
+
+# =============================================================================
+# Resource Settings (Optimized for home hardware)
+# =============================================================================
+resources:
+  max_memory_usage_mb: 256 # Conservative memory limit
+  max_disk_usage_gb: 5 # Reasonable disk usage
+  max_workers: 2 # Limit worker processes
+
+# =============================================================================
+# Feature Flags (v1.0 home lab focus)
+# =============================================================================
+features:
+  # v1.0 Core features (always enabled)
+  enable_auto_discovery: true # Automatic container discovery
+  enable_metrics: true # Prometheus metrics
+  enable_health_checks: true # Health monitoring
+
+  # Home lab UX features
+  show_getting_started: true # First-run wizard
+  enable_simple_mode: true # Simplified interface
+  auto_exclude_harbor: true # Don't update Harbor itself
+
+  # Future features (disabled in v1.0)
+  # Authentication enhancements (M7+)
+  enable_mfa: false # TODO: M7+ Multi-factor auth
+  enable_multi_user: false # TODO: M8+ Multiple users
+  enable_rbac: false # TODO: M8+ Role-based access
+
+  # Update strategy enhancements (M8+)
+  enable_blue_green: false # TODO: M8+ Blue/green deployment
+  enable_canary: false # TODO: M8+ Canary deployment
+
+  # Runtime enhancements (M9+)
+  enable_kubernetes: false # TODO: M9+ Kubernetes support
+  enable_podman: false # TODO: M10+ Podman support
+
+  # Integration enhancements (M7+)
+  enable_slack: false # TODO: M7+ Slack notifications
+  enable_email: false # TODO: M7+ Email notifications
+  enable_ldap: false # TODO: M9+ LDAP authentication
+
+# =============================================================================
+# Maintenance and Operations
+# =============================================================================
+maintenance:
+  # Maintenance windows
+  maintenance_window_start: "02:00" # Start maintenance at 2 AM
+  maintenance_window_end: "05:00" # End maintenance at 5 AM
+  maintenance_days: ["sunday"] # Weekly maintenance on Sunday
+
+  # Blackout periods (no updates during these times)
+  blackout_periods: [] # No blackouts by default
+
+  # Emergency controls
+  global_pause_updates: false # Global update pause switch
+  global_dry_run_mode: false # Global dry-run mode
+  emergency_stop: false # Emergency stop all operations
+
+# =============================================================================
+# Home Lab Specific Settings
+# =============================================================================
+homelab:
+  # Privacy settings (no telemetry)
+  telemetry_enabled: false # Respect privacy - no usage tracking
+
+  # Convenience features
+  auto_generate_passwords: true # Generate secure passwords
+  show_passwords_in_logs: true # Show generated passwords (home lab only)
+
+  # Resource optimization
+  optimize_for_raspberry_pi: auto # Auto-detect and optimize for Pi
+  prefer_arm_images: auto # Prefer ARM images when available
+
+  # Backup and data management
+  auto_backup_before_updates: true # Backup database before major updates
+  compress_backups: true # Compress backup files
+
+  # Network settings
+  bind_to_all_interfaces: true # Bind to 0.0.0.0 (internal networks only)
+  trust_proxy_headers: false # Don't trust proxy headers by default
+
+# =============================================================================
+# Integration Settings
+# =============================================================================
+integrations:
+  # Container orchestration
+  docker_compose:
+    detect_compose_projects: true # Detect docker-compose projects
+    respect_compose_labels: true # Honor compose-specific labels
+
+  # Reverse proxies (common in home labs)
+  reverse_proxy:
+    detect_traefik: true # Auto-detect Traefik
+    detect_caddy: true # Auto-detect Caddy
+    detect_nginx_proxy_manager: true # Auto-detect NPM
+
+  # Monitoring (optional)
+  monitoring:
+    auto_detect_prometheus: true # Auto-detect Prometheus
+    auto_detect_grafana: true # Auto-detect Grafana
+    export_container_metrics: true # Export per-container metrics
+
+# =============================================================================
+# Default Policies (Applied to discovered containers)
+# =============================================================================
+default_policies:
+  # Update behavior
+  auto_update_enabled: true # Enable auto-updates by default
+  exclude_from_updates: false # Don't exclude by default
+  stay_stopped: false # Start containers after update
+
+  # Scheduling
+  check_interval_seconds: null # Use global default
+  update_time: null # Use global default
+  update_timezone: null # Use global default
+  update_days: ["monday", "tuesday", "wednesday", "thursday", "friday"] # Weekdays only
+
+  # Safety
+  health_check_enabled: true # Always verify health
+  health_check_timeout_seconds: 60 # 1 minute timeout
+  health_check_retries: 3 # Retry health checks
+  rollback_enabled: true # Enable rollback
+  rollback_timeout_seconds: 300 # 5 minute rollback timeout
+
+  # Cleanup
+  cleanup_enabled: true # Clean up old images
+  cleanup_keep_images: 2 # Keep 2 previous images
+  cleanup_delay_hours: 24 # Wait 24 hours before cleanup
+
+  # Notifications (future)
+  notify_on_update: false # Don't notify on successful updates
+  notify_on_failure: true # Notify on failures
+
+# =============================================================================
+# Auto-Exclusion Rules (Containers to never update)
+# =============================================================================
+auto_exclusion:
+  # System containers
+  system_containers:
+    - "harbor*" # Harbor itself
+    - "portainer*" # Portainer management
+    - "watchtower*" # Other updaters
+    - "ouroboros*" # Other updaters
+
+  # Infrastructure containers
+  infrastructure_containers:
+    - "*_proxy" # Reverse proxies
+    - "*_lb" # Load balancers
+    - "*_router" # Network routers
+
+  # Data containers (be very careful with databases)
+  data_containers:
+    - "*postgres*" # PostgreSQL databases
+    - "*mysql*" # MySQL databases
+    - "*mariadb*" # MariaDB databases
+    - "*mongo*" # MongoDB databases
+    - "*redis*" # Redis instances
+    - "*elasticsearch*" # Elasticsearch
+
+  # Override exclusions with explicit label
+  override_label: "harbor.force_manage=true"
+
+# =============================================================================
+# Home Lab Optimizations
+# =============================================================================
+optimizations:
+  # Network efficiency
+  prefer_cached_responses: true # Prefer cached registry responses
+  batch_registry_queries: true # Batch multiple queries
+
+  # Resource efficiency
+  lazy_load_features: true # Load features on demand
+  compress_logs: false # Don't compress logs (small scale)
+
+  # Storage efficiency
+  deduplicate_images: false # Don't dedupe (Docker handles this)
+  compress_database: false # SQLite is already efficient
+
+  # Platform-specific
+  raspberry_pi:
+    limit_concurrent_pulls: 1 # One image pull at a time
+    reduce_cache_size: true # Smaller cache for limited storage
+    extend_timeouts: true # Longer timeouts for slower hardware
+
+# =============================================================================
+# Documentation and Help
+# =============================================================================
+help:
+  documentation_url: "https://harbor-docs.dev/home-lab"
+  quick_start_guide: "https://harbor-docs.dev/quick-start"
+  troubleshooting: "https://harbor-docs.dev/troubleshooting"
+  community_support: "https://github.com/harbor/harbor/discussions"
+
+  # In-app help
+  show_tooltips: true # Show helpful tooltips
+  show_examples: true # Show configuration examples
+  show_recommendations: true # Show optimization recommendations
+
+# =============================================================================
+# Migration Support
+# =============================================================================
+migration:
+  # Detect existing tools
+  detect_watchtower: true # Auto-detect Watchtower
+  detect_ouroboros: true # Auto-detect Ouroboros
+
+  # Migration options
+  import_existing_schedules: true # Import existing update schedules
+  preserve_existing_labels: true # Keep existing container labels
+
+  # Migration safety
+  create_backup_before_migration: true # Backup before importing config
+  validate_imported_config: true # Validate imported settings
+
+# =============================================================================
+# Environment-Specific Overrides
+# =============================================================================
+# These settings are automatically applied based on environment detection
+
+environments:
+  raspberry_pi:
+    # Detected by: ARM architecture + limited memory
+    resources:
+      max_memory_usage_mb: 128 # Reduce memory usage
+      max_workers: 1 # Single worker process
+    updates:
+      max_concurrent_updates: 1 # One update at a time
+    logging:
+      retention_days: 7 # Shorter retention
+
+  docker_desktop:
+    # Detected by: Docker Desktop characteristics
+    docker:
+      discovery_interval_seconds: 60 # Faster discovery for development
+
+  low_memory:
+    # Detected by: <1GB available memory
+    resources:
+      max_memory_usage_mb: 128
+    registry:
+      cache_size_mb: 20 # Smaller cache
+    logging:
+      retention_days: 7
+
+  slow_network:
+    # Detected by: High registry response times
+    registry:
+      timeout_seconds: 60 # Longer timeouts
+      cache_ttl_seconds: 7200 # Cache longer (2 hours)
+      retry_count: 5 # More retries
+
+# =============================================================================
+# Recommendations and Tips
+# =============================================================================
+recommendations:
+  # First-time setup
+  setup_tips:
+    - "Change the admin password after first login"
+    - "Review discovered containers before enabling auto-updates"
+    - "Configure update schedules based on your usage patterns"
+    - "Consider using a Docker socket proxy for enhanced security"
+
+  # Performance optimization
+  performance_tips:
+    - "Raspberry Pi users: Consider enabling arm image preferences"
+    - "Slow internet: Increase registry cache TTL and timeouts"
+    - "Many containers: Increase discovery interval to reduce overhead"
+
+  # Security recommendations
+  security_tips:
+    - "For external access: Enable HTTPS and use a reverse proxy"
+    - "For production use: Consider upgrading to enterprise profile"
+    - "Regular backups: Verify backup functionality periodically"
+
+# =============================================================================
+# Example Configurations
+# =============================================================================
+examples:
+  basic_home_lab:
+    description: "Minimal configuration for basic home lab"
+    settings:
+      updates:
+        max_concurrent_updates: 1
+        default_update_time: "04:00"
+      logging:
+        level: WARN # Minimal logging
+
+  raspberry_pi:
+    description: "Optimized for Raspberry Pi"
+    settings:
+      resources:
+        max_memory_usage_mb: 128
+        max_workers: 1
+      updates:
+        max_concurrent_updates: 1
+      registry:
+        cache_size_mb: 20
+
+  high_activity:
+    description: "For labs with many containers"
+    settings:
+      docker:
+        discovery_interval_seconds: 600 # Check every 10 minutes
+      updates:
+        max_concurrent_updates: 3
+      registry:
+        cache_size_mb: 100
+
+  secure_home_lab:
+    description: "Enhanced security for home lab"
+    settings:
+      security:
+        require_https: true
+        api_key_required: true
+        password_min_length: 8
+      docker:
+        host: "tcp://docker-socket-proxy:2375" # Use socket proxy
+
+# =============================================================================
+# Version and Compatibility
+# =============================================================================
+config_version: "1.0" # Configuration schema version
+compatible_harbor_versions: ["0.1.0+"] # Compatible Harbor versions
+last_updated: "2024-01-15" # Configuration last updated date

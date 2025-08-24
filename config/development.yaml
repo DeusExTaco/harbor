@@ -1,73 +1,418 @@
-# Harbor Development Configuration
-# Located: config/development.yaml
-# Development profile configuration as per harbor-architecture.md
+# Harbor Container Updater - Development Configuration
+# Optimized for development workflow with debugging and feature testing
+# Following Harbor architecture design principles
 
+# =============================================================================
+# Deployment Profile
+# =============================================================================
 deployment:
   profile: development
-  auto_setup: true
-  show_welcome: true
+  description: "Development environment with debugging and feature testing"
+  auto_setup: true # Enable auto-setup for quick development
+  show_welcome: true # Show welcome for testing UI
 
+# =============================================================================
+# Application Settings
+# =============================================================================
+app:
+  name: "Harbor Container Updater (Development)"
+  debug: true # Enable debug mode
+  host: "0.0.0.0"
+  port: 8080
+
+# =============================================================================
+# Database Configuration (SQLite with dev optimizations)
+# =============================================================================
 database:
-  url: "sqlite:///data/harbor_dev.db"
-  pool_size: 3
+  type: sqlite
+  # Dev database: sqlite:///data/harbor_dev.db
+  pool_size: 5
+  max_overflow: 2
+  pool_timeout: 30
+  echo_sql: true # Enable SQL logging for debugging
+
+  # Development backup settings
   backup_enabled: true
-  backup_retention_days: 7
+  backup_retention_days: 3 # Shorter retention for dev
+  backup_schedule: "0 3 * * *" # Daily at 3 AM
 
+# =============================================================================
+# Security Settings (Relaxed for development)
+# =============================================================================
 security:
-  require_https: false
-  session_lifetime_hours: 168  # 1 week for convenience
-  password_min_length: 6
-  rate_limiting_enabled: false
+  # Network security (relaxed)
+  require_https: false # HTTP OK for development
+  session_timeout_hours: 72 # 3 day sessions (convenient for dev)
+  session_secure_cookies: false
 
-scheduler:
-  timezone: "auto"
-  max_workers: 2
-  default_check_interval: 300    # 5 minutes for testing
-  default_update_time: "03:00"
+  # Authentication (relaxed)
+  api_key_required: false # Optional for development
+  password_min_length: 4 # Minimal for testing
+  password_require_special: false
 
-features:
-  simple_mode: true
-  getting_started: true
-  auto_discovery: true
-  telemetry: false  # Privacy first
+  # Rate limiting (generous for development)
+  api_rate_limit_per_hour: 10000 # High limit for testing
 
-resources:
-  memory_limit_mb: 256
-  log_retention_days: 7
-  cache_size_mb: 50
+  # Future features (some enabled for testing)
+  mfa_enabled: false # TODO: M7+ Can enable for MFA testing
+  test_future_auth: true # Enable testing of future auth features
 
+# =============================================================================
+# Container Update Settings (Fast iteration)
+# =============================================================================
 updates:
-  max_concurrent: 1             # Conservative for development
-  delay_between_updates: 5
-  default_cleanup_keep: 2
-  health_check_timeout: 60
+  # Scheduling (frequent for testing)
+  default_check_interval_seconds: 300 # Every 5 minutes
+  default_update_time: "now" # Allow immediate updates
+  default_timezone: "UTC"
 
-# Development-specific settings
+  # Concurrency (moderate)
+  max_concurrent_updates: 3 # Moderate concurrency
+  update_delay_seconds: 1 # Brief delay for observation
+
+  # Safety settings (quick feedback)
+  default_health_check_timeout: 30 # Shorter timeout for dev
+  default_rollback_enabled: true # Always enable rollback
+  rollback_timeout_seconds: 120 # Faster rollback
+
+  # Cleanup settings (aggressive for dev)
+  default_cleanup_enabled: true
+  default_cleanup_keep_images: 1 # Keep only 1 old version
+  cleanup_delay_hours: 1 # Quick cleanup
+
+# =============================================================================
+# Docker Runtime Settings (Development)
+# =============================================================================
+docker:
+  # Connection (direct socket for development)
+  host: "unix:///var/run/docker.sock" # Direct access for dev
+  timeout: 30 # Shorter timeout
+
+  # Discovery (frequent for development)
+  discovery_interval_seconds: 60 # Every minute
+  include_stopped_containers: true
+
+  # Development safety patterns (minimal exclusions)
+  exclude_patterns:
+    - "harbor*" # Harbor itself
+    - "*_test" # Test containers
+
+# =============================================================================
+# Registry Settings (Development optimized)
+# =============================================================================
+registry:
+  # Client settings (faster for development)
+  timeout_seconds: 15 # Shorter timeout
+  retry_count: 2 # Fewer retries
+
+  # Caching (smaller for development)
+  cache_ttl_seconds: 300 # 5 minute cache
+  cache_size_mb: 20 # Smaller cache
+
+  # Rate limiting (relaxed)
+  rate_limit_calls_per_hour: 500 # Higher limit for testing
+
+# =============================================================================
+# Logging Settings (Verbose for debugging)
+# =============================================================================
+logging:
+  level: DEBUG # Verbose logging
+  format: text # Human-readable format
+
+  # File logging
+  to_file: true
+  rotation_size_mb: 5 # Smaller log files
+  retention_days: 3 # Short retention
+
+  # Console logging (detailed)
+  to_console: true
+
+  # Development logging features
+  log_sql_queries: true # Log all SQL queries
+  log_http_requests: true # Log all HTTP requests
+  log_docker_api_calls: true # Log Docker API calls
+  log_registry_calls: true # Log registry API calls
+
+# =============================================================================
+# Resource Settings (Development hardware)
+# =============================================================================
+resources:
+  max_memory_usage_mb: 512 # Moderate memory limit
+  max_disk_usage_gb: 10 # Development disk usage
+  max_workers: 2 # Limited workers for debugging
+
+# =============================================================================
+# Feature Flags (Test future features)
+# =============================================================================
+features:
+  # v1.0 Core features
+  enable_auto_discovery: true
+  enable_metrics: true
+  enable_health_checks: true
+
+  # Home lab UX features
+  show_getting_started: true # Test getting started flow
+  enable_simple_mode: true # Test simple mode UI
+  auto_exclude_harbor: true
+
+  # Future features (some enabled for testing)
+  # Authentication testing (M7+)
+  enable_mfa: false # TODO: Set true to test MFA
+  enable_multi_user: false # TODO: Set true to test multi-user
+  enable_rbac: false # TODO: Set true to test RBAC
+
+  # Update strategy testing (M8+)
+  enable_blue_green: false # TODO: Set true to test blue/green
+  enable_canary: false # TODO: Set true to test canary
+
+  # Runtime testing (M9+)
+  enable_kubernetes: false # TODO: Set true to test K8s
+  enable_podman: false # TODO: Set true to test Podman
+
+  # Integration testing (M7+)
+  enable_slack: false # TODO: Set true to test Slack
+  enable_email: false # TODO: Set true to test email
+
+  # Development specific features
+  enable_feature_testing: true # Enable experimental features
+  enable_debug_endpoints: true # Enable debug API endpoints
+  enable_profiling: false # Enable performance profiling
+
+# =============================================================================
+# Development Tools and Debugging
+# =============================================================================
 development:
-  enable_debug: true
-  debug_port: 5678
-  hot_reload: true
-  test_mode: true
-  mock_registry_calls: false    # Use real registries for testing
+  # Hot reload and development features
+  auto_reload: true # Auto-reload on file changes
+  debug_toolbar: false # TODO: M1+ Web debug toolbar
 
-# Redis configuration for development
-redis:
-  host: "redis-dev"
-  port: 6379
-  password: "dev_password_123"  # pragma: allowlist secret
-  db: 0
+  # API development
+  auto_generate_api_docs: true # Auto-generate OpenAPI docs
+  enable_debug_endpoints: true # Enable /debug/* endpoints
+  cors_allow_all: true # Allow all CORS for development
 
-# PostgreSQL configuration (when using postgres profile)
-postgres:
-  host: "postgres-dev"
-  port: 5432
-  database: "harbor_dev"
-  username: "harbor_dev"
-  password: "dev_password_123"  # pragma: allowlist secret
+  # Database development
+  recreate_db_on_startup: false # Recreate database each startup
+  seed_dev_data: true # Seed with development data
 
-# Monitoring configuration
-monitoring:
-  prometheus_enabled: true
-  prometheus_port: 9090
-  grafana_enabled: true
-  grafana_port: 3000
+  # Testing features
+  mock_docker_api: false # Use mocked Docker API
+  mock_registry_api: false # Use mocked registry API
+  simulate_slow_network: false # Simulate slow registry responses
+
+  # Performance profiling
+  enable_profiling: false # Enable cProfile
+  profile_endpoints: [] # Specific endpoints to profile
+  memory_profiling: false # Enable memory profiling
+
+# =============================================================================
+# Test Container Setup
+# =============================================================================
+test_containers:
+  # Create test containers for development
+  create_test_containers: true # Auto-create test containers
+
+  # Test container specifications
+  test_containers:
+    - name: "nginx-test"
+      image: "nginx:alpine"
+      ports: ["8081:80"]
+      labels:
+        harbor.enable: "true"
+        harbor.test: "true"
+
+    - name: "redis-test"
+      image: "redis:alpine"
+      labels:
+        harbor.enable: "true"
+        harbor.test: "true"
+
+    - name: "busybox-test"
+      image: "busybox:latest"
+      command: ["sleep", "3600"]
+      labels:
+        harbor.enable: "true"
+        harbor.test: "true"
+        harbor.policy.update_time: "immediate"
+
+# =============================================================================
+# Development Database Seeding
+# =============================================================================
+seed_data:
+  # Create development users
+  create_dev_users: true
+  dev_users:
+    - username: "admin"
+      password: "dev_admin_123" # pragma: allowlist secret
+      is_admin: true
+      display_name: "Development Admin"
+
+    - username: "dev"
+      password: "dev_user_123" # pragma: allowlist secret
+      is_admin: false
+      display_name: "Development User"
+
+  # Create test API keys
+  create_test_api_keys: true
+  test_api_keys:
+    - name: "development-testing"
+      description: "Development and testing key"
+      scopes: ["admin"]
+
+  # Create sample policies
+  create_sample_policies: true
+  sample_policies:
+    - container_pattern: "*test*"
+      auto_update_enabled: false # Don't auto-update test containers
+      check_interval_seconds: 300 # Check every 5 minutes
+
+    - container_pattern: "nginx*"
+      update_time: "immediate" # Update immediately for testing
+      health_check_timeout_seconds: 15 # Quick health checks
+
+# =============================================================================
+# Mock Services (For testing without external dependencies)
+# =============================================================================
+mocking:
+  # Mock external services for development
+  mock_docker_registry: false # Use real registry by default
+  mock_notification_services: true # Mock notifications
+
+  # Mock data
+  mock_registry_responses:
+    enabled: false
+    latency_ms: 100 # Simulate network latency
+    failure_rate: 0.05 # 5% failure rate for testing
+
+  mock_docker_responses:
+    enabled: false
+    simulate_slow_operations: false # Simulate slow Docker operations
+
+# =============================================================================
+# Integration Testing
+# =============================================================================
+integration_testing:
+  # External service testing
+  test_real_registries: true # Test against real registries
+  test_docker_integration: true # Test real Docker integration
+
+  # Test data management
+  cleanup_test_data: true # Clean up after tests
+  preserve_test_containers: false # Remove test containers after tests
+
+  # Performance testing
+  load_testing_enabled: false # Enable load testing endpoints
+  benchmark_operations: false # Benchmark key operations
+
+# =============================================================================
+# IDE Integration (PyCharm specific)
+# =============================================================================
+ide:
+  # PyCharm integration
+  pycharm_integration: true
+
+  # Debugging
+  debug_port: 5678 # PyCharm remote debug port
+  enable_remote_debugging: false # Enable remote debugging
+
+  # Code assistance
+  type_checking: true # Enable strict type checking
+  code_completion: true # Enhanced code completion
+
+  # Testing integration
+  pytest_integration: true # PyCharm pytest integration
+  coverage_integration: true # Coverage.py integration
+
+# =============================================================================
+# Hot Reload and Development Workflow
+# =============================================================================
+hot_reload:
+  # File watching
+  watch_directories: ["app/", "config/", "templates/"]
+  watch_extensions: [".py", ".yaml", ".html", ".css", ".js"]
+
+  # Reload behavior
+  auto_restart_on_change: true # Restart on code changes
+  preserve_state_on_reload: false # Fresh state on reload
+
+  # Frontend development
+  css_hot_reload: true # Hot reload CSS changes
+  template_hot_reload: true # Hot reload template changes
+
+# =============================================================================
+# Development Environment Detection
+# =============================================================================
+environment_detection:
+  # Detect development environment
+  detect_dev_environment: true
+
+  # Development indicators
+  dev_indicators:
+    - "PYCHARM_HOSTED" # PyCharm environment
+    - "VSCODE_CWD" # VS Code environment
+    - "JUPYTER_SERVER_ROOT" # Jupyter environment
+
+  # Auto-apply dev settings
+  auto_apply_dev_settings: true # Apply dev-specific settings
+  warn_production_settings: true # Warn if production settings detected
+
+# =============================================================================
+# Experimental Features (Behind flags)
+# =============================================================================
+experimental:
+  # Enable experimental endpoints
+  enable_experimental_api: true # /api/v1/experimental/*
+
+  # Future feature testing
+  test_kubernetes_runtime: false # TODO: M9+ Test K8s runtime
+  test_multi_user_auth: false # TODO: M8+ Test multi-user
+  test_blue_green_updates: false # TODO: M8+ Test blue/green
+
+  # Development utilities
+  enable_api_playground: true # Interactive API testing
+  enable_config_editor: true # In-browser config editing
+  enable_log_viewer: true # Enhanced log viewing
+
+# =============================================================================
+# Documentation and Help
+# =============================================================================
+help:
+  documentation_url: "https://harbor-docs.dev/development"
+  api_documentation: "http://localhost:8080/docs"
+  development_guide: "https://harbor-docs.dev/development/setup"
+  troubleshooting: "https://harbor-docs.dev/development/debugging"
+
+  # Development help
+  show_tooltips: true # Show helpful tooltips
+  show_examples: true # Show configuration examples
+  show_debug_info: true # Show debug information
+  show_performance_tips: true # Show performance optimization tips
+
+# =============================================================================
+# Development Workflow
+# =============================================================================
+workflow:
+  # Git integration
+  git_hooks_enabled: true # Enable git pre-commit hooks
+  commit_message_validation: true # Validate commit messages
+
+  # Code quality
+  auto_format_on_save: true # Auto-format code
+  lint_on_save: true # Lint code on save
+  type_check_on_save: false # Type check (can be slow)
+
+  # Testing workflow
+  auto_run_tests: false # Auto-run tests on change
+  test_coverage_threshold: 80 # Minimum coverage for dev
+
+  # Documentation
+  auto_generate_docs: true # Auto-generate API docs
+  validate_docstrings: true # Validate docstring format
+
+# =============================================================================
+# Version and Compatibility
+# =============================================================================
+config_version: "1.0" # Configuration schema version
+compatible_harbor_versions: ["0.1.0+"] # Compatible Harbor versions
+last_updated: "2024-01-15" # Configuration last updated
+development_features_enabled: true # Enable development-specific features
