@@ -29,21 +29,40 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 if TYPE_CHECKING:
     pass
 
-# Optional imports for environment detection
-try:
-    import psutil as _psutil  # Import with prefix to indicate conditional usage
+# Optional imports - using Optional types to fix MyPy issues
+from typing import TYPE_CHECKING
 
+
+if TYPE_CHECKING:
+    # Type checking imports - these won't run at runtime
+    import psutil as PsutilModule
+    import yaml as YamlModule
+else:
+    # Dummy types for runtime
+    PsutilModule = None
+    YamlModule = None
+
+# Module availability flags and optional module storage
+PSUTIL_AVAILABLE = False
+YAML_AVAILABLE = False
+
+# Optional module variables with proper typing
+psutil: Any | None = None
+yaml: Any | None = None
+
+# Try imports at module level
+try:
+    if not TYPE_CHECKING:
+        import psutil
     PSUTIL_AVAILABLE = True
 except ImportError:
-    _psutil = None
     PSUTIL_AVAILABLE = False
 
 try:
-    import yaml as _yaml  # Import with prefix to indicate conditional usage
-
+    if not TYPE_CHECKING:
+        import yaml
     YAML_AVAILABLE = True
 except ImportError:
-    _yaml = None  # type: ignore[assignment]
     YAML_AVAILABLE = False
 
 
@@ -864,18 +883,20 @@ def load_profile_config(profile: DeploymentProfile) -> dict[str, Any]:
     """
     config_file = Path("config") / f"{profile.value}.yaml"
 
-    if config_file.exists():
-        if YAML_AVAILABLE and _yaml:
-            try:
-                with config_file.open() as f:
-                    return _yaml.safe_load(f) or {}
-            except Exception as e:
-                # Log warning but don't fail startup
-                print(f"Warning: Could not load {config_file}: {e}")
-        else:
-            print(f"Warning: YAML support not available, skipping {config_file}")
+    if not config_file.exists():
+        return {}
 
-    return {}
+    if not YAML_AVAILABLE or not yaml:
+        print(f"Warning: YAML support not available, skipping {config_file}")
+        return {}
+
+    try:
+        with config_file.open() as f:
+            return yaml.safe_load(f) or {}
+    except Exception as e:
+        # Log warning but don't fail startup
+        print(f"Warning: Could not load {config_file}: {e}")
+        return {}
 
 
 def get_profile_recommendations(profile: DeploymentProfile) -> dict[str, str]:
@@ -942,12 +963,12 @@ def detect_environment() -> dict[str, Any]:
     }
 
     # Add resource information if psutil is available
-    if PSUTIL_AVAILABLE and _psutil:
+    if PSUTIL_AVAILABLE and psutil:
         try:
             env_info["resources"] = {
-                "cpu_count": _psutil.cpu_count(),
-                "memory_gb": round(_psutil.virtual_memory().total / (1024**3), 1),
-                "disk_free_gb": round(_psutil.disk_usage("/").free / (1024**3), 1),
+                "cpu_count": psutil.cpu_count(),
+                "memory_gb": round(psutil.virtual_memory().total / (1024**3), 1),
+                "disk_free_gb": round(psutil.disk_usage("/").free / (1024**3), 1),
             }
         except Exception:
             # If psutil fails, add placeholder values
@@ -982,14 +1003,14 @@ def _suggest_deployment_profile() -> str:
         return "development"
 
     # Check resource constraints (likely Raspberry Pi or home lab)
-    if PSUTIL_AVAILABLE and _psutil:
+    if PSUTIL_AVAILABLE and psutil:
         try:
-            memory_gb = _psutil.virtual_memory().total / (1024**3)
+            memory_gb = psutil.virtual_memory().total / (1024**3)
             if memory_gb < 2:
                 return "homelab"  # Low memory suggests home lab
         except Exception:
             # Silently handle psutil errors - this is environment detection, not critical
-            pass  # nosec B110
+            return "homelab"  # Default fallback
 
     # Default to home lab for unknown environments
     return "homelab"

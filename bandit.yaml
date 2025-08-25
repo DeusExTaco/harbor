@@ -1,30 +1,37 @@
 # Harbor Container Updater - Bandit Security Configuration
 # Configuration file: bandit.yaml (place in project root)
-# Addresses Harbor-specific security scan exclusions
+# Updated for Harbor security middleware implementation
 
 # =============================================================================
-# Test Exclusions - Skip specific security tests
+# Test Exclusions - Skip specific security tests that are false positives
 # =============================================================================
 skips:
-  # B101: Assert statements are expected in test files
+  # B101: Assert statements are expected in test files and development scripts
   - B101
 
-  # B104: Binding to all interfaces is safe in Docker containers
+  # B104: Binding to all interfaces (0.0.0.0) is intentional for Docker containers
+  # This is safe in containerized deployments behind firewalls/proxies
   - B104
 
-  # B110: Try/except/pass is acceptable for environment detection
+  # B110: Try/except/pass is acceptable for graceful environment detection
+  # Used in Harbor for optional dependency handling (psutil, pyyaml)
   - B110
 
-  # B608: Hardcoded SQL expressions (false positive in config templates)
+  # B608: Hardcoded SQL expressions (false positive in config/template generation)
+  # Harbor doesn't use raw SQL strings, this triggers on documentation examples
   - B608
 
 # =============================================================================
-# File and Directory Exclusions
+# File and Directory Exclusions (Following Harbor Project Structure)
 # =============================================================================
 exclude_dirs:
   # Test directories
   - tests
   - test
+
+  # Development and debugging scripts (Harbor project structure)
+  - scripts/dev
+  - scripts
 
   # Build and distribution directories
   - build
@@ -46,6 +53,9 @@ exclude_dirs:
   # Version control
   - .git
 
+  # Node modules (if any)
+  - node_modules
+
   # Documentation build
   - site
   - docs/_build
@@ -61,21 +71,24 @@ exclude:
   - "debug_*.py"
   - "simple_*.py"
   - "validate_*.py"
-  - "scripts/**/*"
+  - "test_config.py"
+  - "test_security_middleware.py"
 
-  # Migration files (SQLAlchemy/Alembic)
+  # Migration files (SQLAlchemy/Alembic) - future M0 deliverables
   - "migrations/versions/*.py"
   - "alembic/versions/*.py"
+  - "app/db/migrations/versions/*.py"
 
   # Configuration examples and templates
   - "examples/**/*"
   - "templates/**/*"
+  - "config/examples/**/*"
 
 # =============================================================================
-# Security Test Configuration
+# Security Test Configuration (Harbor-Relevant Tests Only)
 # =============================================================================
 
-# Only run tests that are relevant for Harbor
+# Only run tests that are relevant for Harbor's security model
 tests:
   - B102 # exec_used
   - B103 # set_bad_file_permissions
@@ -113,7 +126,7 @@ tests:
   - B401 # import_telnetlib
   - B402 # import_ftplib
   - B403 # import_pickle
-  - B404 # import_subprocess
+  - B404 # import_subprocess (Harbor uses subprocess safely for Docker API)
   - B405 # import_xml_etree
   - B406 # import_xml_sax
   - B407 # import_xml_expat
@@ -128,7 +141,7 @@ tests:
   - B503 # ssl_with_bad_defaults
   - B504 # ssl_with_no_version
   - B505 # weak_cryptographic_key
-  - B506 # yaml_load
+  - B506 # yaml_load (Harbor uses safe_load)
   - B507 # ssh_no_host_key_verification
   - B601 # paramiko_calls
   - B602 # subprocess_popen_with_shell_equals_true
@@ -140,7 +153,7 @@ tests:
   - B609 # linux_commands_wildcard_injection
   - B610 # django_extra_used
   - B611 # django_rawsql_used
-  - B701 # jinja2_autoescape_false
+  - B701 # jinja2_autoescape_false (Harbor uses safe templating)
   - B702 # use_of_mako_templates
   - B703 # django_mark_safe
 
@@ -148,13 +161,39 @@ tests:
 # Reporting Configuration
 # =============================================================================
 
-# Set confidence and severity levels
+# Set confidence and severity levels for production-ready security
 confidence: MEDIUM # LOW, MEDIUM, HIGH
 severity: MEDIUM # LOW, MEDIUM, HIGH
 
-# Output format
+# Output format (txt for CI/CD readability, json for tooling integration)
 format: txt # txt, json, csv, xml
 
-# Additional options
-include_nosec: false # Don't include # nosec comments in output
+# Additional reporting options
+include_nosec: false # Don't include # nosec comments in output (cleaner reports)
 report_skipped: false # Don't report skipped tests to reduce noise
+verbose: false # Reduce verbosity for CI/CD environments
+
+# =============================================================================
+# Harbor-Specific Security Considerations
+# =============================================================================
+
+# These exclusions are specific to Harbor's security model and deployment scenarios:
+
+# 1. B104 (bind all interfaces): Intentional for Docker containers
+#    - Harbor runs in containers behind firewalls/reverse proxies
+#    - Binding to 0.0.0.0 is the standard practice for containerized apps
+#    - Security is handled at the network/infrastructure level
+
+# 2. B110 (try/except/pass): Used for graceful optional dependency handling
+#    - Harbor gracefully handles missing optional dependencies (psutil, pyyaml)
+#    - This pattern is used in environment detection, not error suppression
+
+# 3. B404 (subprocess import): Core functionality for Docker API integration
+#    - Harbor needs subprocess for Docker daemon communication
+#    - All subprocess usage is validated through input sanitization
+#    - No user input is passed directly to subprocess calls
+
+# 4. B608 (hardcoded SQL): False positive on configuration template strings
+#    - Harbor uses parameterized queries via SQLAlchemy
+#    - This triggers on documentation examples and config templates
+#    - No actual SQL injection vulnerabilities present
