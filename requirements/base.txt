@@ -1,76 +1,59 @@
-# Harbor Container Updater - Base Dependencies
+# Harbor Container Updater - Base Dependencies (Simplified)
 # Core runtime dependencies for Harbor v1.0 (M0-M6 milestones)
-# Following Harbor architecture design from foundational documents
 
 # =============================================================================
 # Web Framework and Async Support
 # =============================================================================
-fastapi>=0.104.0,<0.120.0          # Modern web framework with automatic OpenAPI
-uvicorn[standard]>=0.24.0  # ASGI server with performance extras
-python-multipart>=0.0.6,<0.1.0     # Form data support for file uploads
+fastapi>=0.104.0,<0.120.0
+uvicorn[standard]>=0.24.0,<0.30.0
+python-multipart>=0.0.6,<0.1.0
 
 # =============================================================================
 # Configuration and Validation
 # =============================================================================
-pydantic>=2.5.0,<3.0.0              # Data validation and serialization
-pydantic-settings>=2.1.0,<3.0.0     # Settings management (BaseSettings)
+pydantic>=2.5.0,<3.0.0
+pydantic-settings>=2.1.0,<3.0.0
 
 # =============================================================================
 # Database and ORM
 # =============================================================================
-sqlalchemy>=2.0.0,<2.1.0            # Modern async ORM
-alembic>=1.12.0,<2.0.0              # Database migrations
-aiosqlite>=0.19.0           # Async SQLite driver (home lab default)
+sqlalchemy>=2.0.0,<2.1.0
+alembic>=1.12.0,<2.0.0
+aiosqlite>=0.19.0,<0.21.0
 
 # =============================================================================
-# Template Engine and UI
+# Template Engine
 # =============================================================================
-jinja2>=3.1.0,<4.0.0                # Template engine for web UI
+jinja2>=3.1.0,<4.0.0
 
 # =============================================================================
-# HTTP Client and Networking
+# HTTP Client and Docker
 # =============================================================================
-httpx>=0.25.0               # Modern async HTTP client for registry API
+httpx>=0.25.0,<0.28.0
+docker>=6.1.0,<8.0.0
 
 # =============================================================================
-# Container Runtime Integration
+# Scheduling and Logging
 # =============================================================================
-docker>=6.1.0,<8.0.0                # Docker SDK for Python
+apscheduler>=3.10.0,<4.0.0
+structlog>=23.2.0,<24.0.0
+prometheus-client>=0.19.0,<1.0.0
 
 # =============================================================================
-# Job Scheduling
+# Security
 # =============================================================================
-apscheduler>=3.10.0,<4.0.0          # Advanced Python Scheduler
+argon2-cffi>=23.1.0,<24.0.0
+cryptography>=41.0.0,<43.0.0
 
 # =============================================================================
-# Logging and Monitoring
+# Utilities
 # =============================================================================
-structlog>=23.2.0          # Structured logging
-prometheus-client>=0.19.0,<1.0.0    # Prometheus metrics
+python-dateutil>=2.8.0,<3.0.0
+packaging>=23.0,<25.0
 
 # =============================================================================
-# Security and Cryptography
+# Optional Dependencies (graceful fallback if missing)
 # =============================================================================
-argon2-cffi>=23.1.0         # Secure password hashing
-cryptography>=41.0.0        # Credential encryption and security
-
-# =============================================================================
-# Utilities and Helpers
-# =============================================================================
-python-dateutil>=2.8.0,<3.0.0       # Enhanced date/time handling
-packaging>=23.0                # Version parsing and comparison
-
-# =============================================================================
-# Optional Dependencies (graceful degradation if missing)
-# =============================================================================
-# These are optional for core functionality but recommended for full features
-
-# System monitoring (optional - graceful fallback if missing)
-psutil>=5.9.0                # System resource monitoring
-
-# YAML configuration support (optional - env vars work without this)
-pyyaml>=6.0,<7.0                    # YAML configuration file support
-types-pyyaml>=6.0.0                 # Type stubs for PyYAML
-
-# Enhanced timezone support (optional)
-tzdata>=2023.3                      # Timezone data for scheduling
+psutil>=5.9.0,<6.0.0
+pyyaml>=6.0,<7.0
+tzdata>=2023.3

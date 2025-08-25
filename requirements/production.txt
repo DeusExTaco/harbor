@@ -1,75 +1,43 @@
-# Harbor Container Updater - Production Dependencies
-# Additional dependencies for enterprise production deployments
-# Following Harbor architecture design from foundational documents
+# Harbor Container Updater - Production Dependencies (Simplified)
+# Additional dependencies for production deployments
 
 # Include base requirements
 -r base.txt
 
 # =============================================================================
-# Production Database Drivers
+# Production Database Driver
 # =============================================================================
-psycopg2-binary>=2.9.0,<3.0.0      # PostgreSQL driver (enterprise database)
+psycopg2-binary>=2.9.0,<3.0.0
 
 # =============================================================================
-# Production Server
+# Production Performance
 # =============================================================================
-gunicorn>=21.2.0,<22.0.0           # Production WSGI server with worker management
+orjson>=3.9.0,<4.0.0
 
 # =============================================================================
-# Caching and Sessions (Enterprise)
+# Production Caching (Future)
 # =============================================================================
-redis>=5.0.0,<6.0.0                # Redis for caching and session storage
-hiredis>=2.2.0,<3.0.0              # High-performance Redis client
+# redis>=5.0.0,<6.0.0  # Enable when implementing M8+ caching features
 
 # =============================================================================
-# Monitoring and Observability
+# Production Server (Future)
 # =============================================================================
-opentelemetry-api>=1.21.0,<2.0.0   # TODO: M7+ Distributed tracing
-opentelemetry-sdk>=1.21.0,<2.0.0   # TODO: M7+ Tracing implementation
-sentry-sdk>=1.40.0,<2.0.0          # TODO: M7+ Error tracking and monitoring
+# gunicorn>=21.2.0,<22.0.0  # Enable when deploying with gunicorn
 
 # =============================================================================
-# Security Enhancements (Enterprise)
+# Production Email Support (Future - M7+)
 # =============================================================================
-pyotp>=2.9.0,<3.0.0                # TODO: M7+ TOTP for MFA
-qrcode>=7.4.0,<8.0.0               # TODO: M7+ QR codes for MFA setup
+# aiosmtplib>=3.0.0,<4.0.0  # Enable when implementing M7+ email notifications
+# email-validator>=2.1.0,<3.0.0  # Enable when implementing M7+ email validation
 
 # =============================================================================
-# Enterprise Authentication (Future)
+# Production Monitoring (Future - M7+)
 # =============================================================================
-python-ldap>=3.4.0,<4.0.0          # TODO: M9+ LDAP authentication
-python-jose>=3.3.0,<4.0.0          # TODO: M9+ JWT token handling for SAML/OAuth
+# opentelemetry-api>=1.21.0,<2.0.0  # Enable when implementing M7+ tracing
+# sentry-sdk>=1.40.0,<2.0.0  # Enable when implementing M7+ error tracking
 
 # =============================================================================
-# Compliance and Audit (Enterprise)
+# Production Security (Future - M7+)
 # =============================================================================
-# TODO: M9+ Compliance frameworks
-# cryptography already included in base requirements for encryption
-
-# =============================================================================
-# Performance Optimization
-# =============================================================================
-orjson>=3.9.0,<4.0.0               # Fast JSON serialization
-ujson>=5.8.0,<6.0.0                # Ultra-fast JSON parsing (fallback)
-
-# =============================================================================
-# Background Task Processing (Enterprise Scale)
-# =============================================================================
-celery>=5.3.0,<6.0.0               # TODO: M8+ Distributed task queue
-redis>=5.0.0,<6.0.0                # Required for Celery broker (already included above)
-
-# =============================================================================
-# Email Support (Enterprise Notifications)
-# =============================================================================
-aiosmtplib>=3.0.0,<4.0.0           # TODO: M7+ Async SMTP client
-email-validator>=2.1.0,<3.0.0      # TODO: M7+ Email address validation
-
-# =============================================================================
-# Webhook and Integration Support
-# =============================================================================
-pydantic[email]>=2.5.0,<3.0.0      # Enhanced validation for integrations
-
-# =============================================================================
-# Health Check Enhancements
-# =============================================================================
-aiofiles>=23.2.0,<24.0.0           # Async file I/O for log processing
+# pyotp>=2.9.0,<3.0.0  # Enable when implementing M7+ TOTP for MFA
+# python-ldap>=3.4.0,<4.0.0  # Enable when implementing M9+ LDAP auth
