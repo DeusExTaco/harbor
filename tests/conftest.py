@@ -281,15 +281,15 @@ def mock_homelab_config(monkeypatch):
     monkeypatch.setenv("ENABLE_AUTO_DISCOVERY", "true")
     monkeypatch.setenv("TESTING", "true")
 
-    # Clear cached settings to force reload
-    from app.config import _settings
+    # Clear cached settings to force reload - FIXED
+    from app.config import clear_settings_cache
 
-    _settings.clear()
+    clear_settings_cache()
 
     yield
 
     # Clear settings again after test
-    _settings.clear()
+    clear_settings_cache()
 
 
 @pytest.fixture
@@ -301,15 +301,15 @@ def mock_production_config(monkeypatch):
     monkeypatch.setenv("MAX_CONCURRENT_UPDATES", "10")
     monkeypatch.setenv("TESTING", "true")
 
-    # Clear cached settings to force reload
-    from app.config import _settings
+    # Clear cached settings to force reload - FIXED
+    from app.config import clear_settings_cache
 
-    _settings.clear()
+    clear_settings_cache()
 
     yield
 
     # Clear settings again after test
-    _settings.clear()
+    clear_settings_cache()
 
 
 # ============================================================================
@@ -405,18 +405,24 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(autouse=True)
-def setup_test_environment(request):
+def setup_test_environment(monkeypatch):
     """Automatically set up test environment for all tests"""
-    # Clear any cached settings before each test
-    from app.config import _settings
-
-    _settings.clear()
-
     # Set test-specific environment variables
-    os.environ.setdefault("HARBOR_MODE", "development")
-    os.environ.setdefault("LOG_LEVEL", "DEBUG")
-    os.environ.setdefault("TESTING", "true")
-    os.environ.setdefault("ENABLE_AUTO_DISCOVERY", "false")
+    monkeypatch.setenv("HARBOR_MODE", "development")
+    monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("ENABLE_AUTO_DISCOVERY", "false")
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+
+    # Clear any cached settings before each test - FIXED
+    from app.config import clear_settings_cache
+
+    clear_settings_cache()
+
+    yield
+
+    # Clean up after test
+    clear_settings_cache()
 
 
 # ============================================================================
