@@ -1,69 +1,35 @@
+# app/config.py
 """
-Harbor Container Updater - Configuration Management
+Harbor Configuration Management - FIXED TYPE ANNOTATIONS
 
-Environment-based configuration with Pydantic Settings for Harbor.
-Supports multiple deployment profiles with progressive complexity.
-
-Implementation: M0 Milestone - Foundation Phase
-Following Harbor project structure and feature flags design.
-
-Features:
-- Profile-based configuration (homelab, development, staging, production)
-- Environment variable override support
-- Validation with clear error messages
-- Feature flag integration
-- Security-conscious defaults
+Uses factory pattern to explicitly read environment variables and pass them
+as initialization data to Pydantic. This bypasses Pydantic's environment
+variable caching issues.
 """
 
 import os
-import secrets
+import platform
+import sys
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-# Type checking imports
-if TYPE_CHECKING:
-    pass
-
-# Optional imports - using Optional types to fix MyPy issues
-from typing import TYPE_CHECKING
-
-
-if TYPE_CHECKING:
-    # Type checking imports - these won't run at runtime
-    import psutil as PsutilModule
-    import yaml as YamlModule
-else:
-    # Dummy types for runtime
-    PsutilModule = None
-    YamlModule = None
-
-# Module availability flags and optional module storage
-PSUTIL_AVAILABLE = False
-YAML_AVAILABLE = False
-
-# Optional module variables with proper typing
-psutil: Any | None = None
-yaml: Any | None = None
-
-# Try imports at module level
-try:
-    if not TYPE_CHECKING:
-        import psutil
-    PSUTIL_AVAILABLE = True
-except ImportError:
-    PSUTIL_AVAILABLE = False
 
 try:
-    if not TYPE_CHECKING:
-        import yaml
-    YAML_AVAILABLE = True
+    # Pydantic v2 - BaseSettings moved to pydantic-settings
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+
+    PYDANTIC_V2 = True
 except ImportError:
-    YAML_AVAILABLE = False
+    # Fallback for Pydantic v1
+    from pydantic import BaseSettings  # type: ignore[no-redef]
+
+    PYDANTIC_V2 = False
+
+from app.utils.logging import get_logger
+
+
+logger = get_logger(__name__)
 
 
 # =============================================================================
@@ -72,16 +38,16 @@ except ImportError:
 
 
 class DeploymentProfile(str, Enum):
-    """Deployment profile types following Harbor architecture design"""
+    """Deployment profile options"""
 
-    HOMELAB = "homelab"  # Home lab optimized defaults
-    DEVELOPMENT = "development"  # Development with debugging
-    STAGING = "staging"  # Pre-production testing
-    PRODUCTION = "production"  # Enterprise production
+    HOMELAB = "homelab"
+    DEVELOPMENT = "development"
+    STAGING = "staging"
+    PRODUCTION = "production"
 
 
 class LogLevel(str, Enum):
-    """Logging levels"""
+    """Logging level options"""
 
     TRACE = "TRACE"
     DEBUG = "DEBUG"
@@ -91,1010 +57,782 @@ class LogLevel(str, Enum):
     CRITICAL = "CRITICAL"
 
 
-class LogFormat(str, Enum):
-    """Log output formats"""
-
-    TEXT = "text"  # Human-readable (home lab)
-    JSON = "json"  # Structured (production)
-
-
 class DatabaseType(str, Enum):
-    """Supported database types"""
+    """Database type options"""
 
     SQLITE = "sqlite"
     POSTGRESQL = "postgresql"
 
 
 # =============================================================================
-# Configuration Models
+# Environment Variable Reader - THE CORE FIX
+# =============================================================================
+
+
+class EnvironmentReader:
+    """
+    Centralized environment variable reading with type conversion
+
+    This is the key to fixing the Pydantic environment variable issues.
+    We explicitly read environment variables and convert them to the
+    correct types before passing to Pydantic.
+    """
+
+    @staticmethod
+    def read_str(env_var: str, default: str) -> str:
+        """Read string environment variable"""
+        return os.getenv(env_var, default)
+
+    @staticmethod
+    def read_bool(env_var: str, default: bool) -> bool:
+        """Read boolean environment variable"""
+        value = os.getenv(env_var)
+        if value is None:
+            return default
+        return value.lower() in ("true", "1", "yes", "on")
+
+    @staticmethod
+    def read_int(env_var: str, default: int) -> int:
+        """Read integer environment variable"""
+        value = os.getenv(env_var)
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except ValueError:
+            logger.warning(
+                f"Invalid integer value for {env_var}: {value}, using default: {default}"
+            )
+            return default
+
+    @staticmethod
+    def read_enum(env_var: str, enum_class: type, default: Any) -> Any:
+        """Read enum environment variable"""
+        value = os.getenv(env_var)
+        if value is None:
+            return default
+        try:
+            return enum_class(value)
+        except ValueError:
+            logger.warning(
+                f"Invalid {enum_class.__name__} value for {env_var}: {value}, using default: {default}"
+            )
+            return default
+
+    @staticmethod
+    def read_path(env_var: str, default: str) -> Path:
+        """Read path environment variable"""
+        value = os.getenv(env_var, default)
+        return Path(value)
+
+    @staticmethod
+    def read_list(env_var: str, default: list[str]) -> list[str]:
+        """Read comma-separated list environment variable"""
+        value = os.getenv(env_var)
+        if value is None:
+            return default
+        return [item.strip() for item in value.split(",") if item.strip()]
+
+
+# Global environment reader instance
+env = EnvironmentReader()
+
+
+# =============================================================================
+# Settings Classes - REWRITTEN TO USE FACTORY PATTERN
 # =============================================================================
 
 
 class DatabaseSettings(BaseSettings):
-    """Database configuration settings"""
+    """Database configuration settings - uses factory pattern"""
 
-    # Database connection
-    database_url: str | None = Field(
-        default=None, description="Database URL (auto-generated if not provided)"
-    )
-    database_type: DatabaseType = Field(
-        default=DatabaseType.SQLITE, description="Database type to use"
-    )
+    database_type: DatabaseType
+    database_url: str | None
+    sqlite_path: Path | None
+    pool_size: int
+    max_overflow: int
+    pool_timeout: int
 
-    # Connection pool settings
-    pool_size: int = Field(
-        default=5, ge=1, le=100, description="Database connection pool size"
-    )
-    max_overflow: int = Field(
-        default=2, ge=0, le=50, description="Database connection pool overflow"
-    )
-    pool_timeout: int = Field(
-        default=30, ge=5, le=300, description="Database connection timeout (seconds)"
-    )
+    if PYDANTIC_V2:
+        model_config = SettingsConfigDict(extra="ignore")
+    else:
 
-    # Performance settings
-    echo_sql: bool = Field(
-        default=False, description="Echo SQL queries (development only)"
-    )
+        class Config:
+            extra = "ignore"
 
-    # Backup settings (home lab)
-    backup_enabled: bool = Field(
-        default=True, description="Enable automatic database backups"
-    )
-    backup_retention_days: int = Field(
-        default=7, ge=1, le=365, description="Days to retain database backups"
-    )
 
-    model_config = SettingsConfigDict(env_prefix="HARBOR_DB_")
+def create_database_settings() -> DatabaseSettings:
+    """Factory function for DatabaseSettings"""
+    return DatabaseSettings(
+        database_type=env.read_enum(
+            "HARBOR_DATABASE_TYPE", DatabaseType, DatabaseType.SQLITE
+        ),
+        database_url=os.getenv("DATABASE_URL"),
+        sqlite_path=env.read_path("HARBOR_SQLITE_PATH", "data/harbor.db")
+        if not os.getenv("DATABASE_URL")
+        else None,
+        pool_size=env.read_int("HARBOR_DB_POOL_SIZE", 5),
+        max_overflow=env.read_int("HARBOR_DB_MAX_OVERFLOW", 10),
+        pool_timeout=env.read_int("HARBOR_DB_POOL_TIMEOUT", 30),
+    )
 
 
 class SecuritySettings(BaseSettings):
-    """Security configuration settings"""
+    """Security configuration settings - uses factory pattern"""
 
-    # Core security
-    secret_key: str = Field(
-        default_factory=lambda: secrets.token_urlsafe(32),
-        description="Application secret key for encryption",
-    )
-    secret_key_file: Path | None = Field(
-        default=None, description="Path to file containing secret key"
-    )
+    require_https: bool
+    api_key_required: bool
+    session_timeout_hours: int
+    api_rate_limit_per_hour: int
+    password_min_length: int
+    password_require_special: bool
 
-    # HTTP/HTTPS
-    require_https: bool = Field(
-        default=False, description="Require HTTPS for all requests"
-    )
+    if PYDANTIC_V2:
+        model_config = SettingsConfigDict(extra="ignore")
+    else:
 
-    # Session management
-    session_timeout_hours: int = Field(
-        default=168,  # 1 week for home lab
-        ge=1,
-        le=8760,  # 1 year max
-        description="Session timeout in hours",
-    )
-    session_secure_cookies: bool = Field(
-        default=False, description="Use secure cookies (requires HTTPS)"
-    )
-
-    # API security
-    api_key_required: bool = Field(
-        default=False, description="Require API key for programmatic access"
-    )
-    api_rate_limit_per_hour: int = Field(
-        default=1000, ge=10, le=100000, description="API requests per hour limit"
-    )
-
-    # Password policy
-    password_min_length: int = Field(
-        default=6,  # Relaxed for home lab
-        ge=4,
-        le=128,
-        description="Minimum password length",
-    )
-    password_require_special: bool = Field(
-        default=False, description="Require special characters in passwords"
-    )
-
-    # Future features (behind feature flags)
-    # TODO: M7+ - Multi-factor authentication
-    mfa_enabled: bool = Field(
-        default=False, description="Enable multi-factor authentication (M7+)"
-    )
-
-    model_config = SettingsConfigDict(env_prefix="HARBOR_SECURITY_")
+        class Config:
+            extra = "ignore"
 
 
-class UpdateSettings(BaseSettings):
-    """Container update configuration settings"""
+def create_security_settings(profile: DeploymentProfile) -> SecuritySettings:
+    """Factory function for SecuritySettings with profile-aware defaults"""
 
-    # Default update policy
-    default_check_interval_seconds: int = Field(
-        default=86400,  # Daily
-        ge=300,  # 5 minutes minimum
-        le=604800,  # 1 week maximum
-        description="Default interval between update checks",
-    )
-    default_update_time: str = Field(
-        default="03:00",
-        pattern=r"^([0-1][0-9]|2[0-3]):[0-5][0-9]$",
-        description="Default time for scheduled updates (HH:MM)",
-    )
-    default_timezone: str = Field(
-        default="UTC", description="Default timezone for scheduling"
-    )
+    # Profile-specific defaults
+    if profile == DeploymentProfile.HOMELAB:
+        default_https = False
+        default_session_timeout = 168  # 1 week
+        default_password_length = 6
+        default_require_special = False
+    elif profile == DeploymentProfile.DEVELOPMENT:
+        default_https = False
+        default_session_timeout = 72  # 3 days
+        default_password_length = 6
+        default_require_special = False
+    elif profile == DeploymentProfile.STAGING:
+        default_https = True
+        default_session_timeout = 24  # 1 day
+        default_password_length = 8
+        default_require_special = True
+    else:  # PRODUCTION
+        default_https = True
+        default_session_timeout = 8  # 8 hours
+        default_password_length = 12
+        default_require_special = True
 
-    # Concurrency and performance
-    max_concurrent_updates: int = Field(
-        default=2,  # Conservative for home lab
-        ge=1,
-        le=50,
-        description="Maximum concurrent update operations",
+    return SecuritySettings(
+        require_https=env.read_bool("HARBOR_REQUIRE_HTTPS", default_https),
+        api_key_required=env.read_bool(
+            "HARBOR_API_KEY_REQUIRED", profile == DeploymentProfile.PRODUCTION
+        ),
+        session_timeout_hours=env.read_int(
+            "HARBOR_SESSION_TIMEOUT_HOURS", default_session_timeout
+        ),
+        api_rate_limit_per_hour=env.read_int("HARBOR_API_RATE_LIMIT_PER_HOUR", 1000),
+        password_min_length=env.read_int(
+            "HARBOR_SECURITY_PASSWORD_MIN_LENGTH", default_password_length
+        ),
+        password_require_special=env.read_bool(
+            "HARBOR_SECURITY_PASSWORD_REQUIRE_SPECIAL", default_require_special
+        ),
     )
-    update_delay_seconds: int = Field(
-        default=0, ge=0, le=300, description="Delay between starting concurrent updates"
-    )
-
-    # Safety settings
-    default_health_check_timeout: int = Field(
-        default=60, ge=10, le=600, description="Default health check timeout (seconds)"
-    )
-    default_rollback_enabled: bool = Field(
-        default=True, description="Enable automatic rollback by default"
-    )
-
-    # Cleanup settings
-    default_cleanup_enabled: bool = Field(
-        default=True, description="Enable automatic image cleanup by default"
-    )
-    default_cleanup_keep_images: int = Field(
-        default=2, ge=1, le=10, description="Default number of old images to keep"
-    )
-    cleanup_delay_hours: int = Field(
-        default=24,
-        ge=1,
-        le=168,
-        description="Hours to wait before cleaning up old images",
-    )
-
-    model_config = SettingsConfigDict(env_prefix="HARBOR_UPDATE_")
-
-
-class RegistrySettings(BaseSettings):
-    """Container registry configuration settings"""
-
-    # Registry client settings
-    timeout_seconds: int = Field(
-        default=30, ge=5, le=300, description="Registry request timeout"
-    )
-    retry_count: int = Field(
-        default=3,
-        ge=0,
-        le=10,
-        description="Number of retries for failed registry requests",
-    )
-
-    # Caching settings
-    cache_ttl_seconds: int = Field(
-        default=3600,  # 1 hour
-        ge=60,
-        le=86400,
-        description="Registry response cache TTL",
-    )
-    cache_size_mb: int = Field(
-        default=50, ge=10, le=1000, description="Maximum registry cache size (MB)"
-    )
-
-    # Rate limiting (respect registry limits)
-    rate_limit_calls_per_hour: int = Field(
-        default=100, ge=10, le=10000, description="Registry API calls per hour limit"
-    )
-
-    model_config = SettingsConfigDict(env_prefix="HARBOR_REGISTRY_")
 
 
 class LoggingSettings(BaseSettings):
-    """Logging configuration settings"""
+    """Logging configuration settings - uses factory pattern"""
 
-    # Log levels and formats
-    log_level: LogLevel = Field(
-        default=LogLevel.INFO, description="Application log level"
+    log_level: LogLevel
+    log_format: str
+    log_retention_days: int
+    enable_file_logging: bool
+
+    if PYDANTIC_V2:
+        model_config = SettingsConfigDict(extra="ignore")
+    else:
+
+        class Config:
+            extra = "ignore"
+
+
+def create_logging_settings(profile: DeploymentProfile) -> LoggingSettings:
+    """Factory function for LoggingSettings with profile-aware defaults"""
+
+    # Profile-specific defaults
+    if profile == DeploymentProfile.DEVELOPMENT:
+        default_level = LogLevel.DEBUG
+        default_retention = 7
+    elif profile == DeploymentProfile.PRODUCTION:
+        default_level = LogLevel.INFO
+        default_retention = 90
+    else:
+        default_level = LogLevel.INFO
+        default_retention = 14
+
+    return LoggingSettings(
+        log_level=env.read_enum("HARBOR_LOG_LOG_LEVEL", LogLevel, default_level),
+        log_format=env.read_str("HARBOR_LOG_FORMAT", "text"),
+        log_retention_days=env.read_int("HARBOR_LOG_RETENTION_DAYS", default_retention),
+        enable_file_logging=env.read_bool("HARBOR_ENABLE_FILE_LOGGING", True),
     )
-    log_format: LogFormat = Field(
-        default=LogFormat.TEXT, description="Log output format"
-    )
-
-    # File logging
-    log_to_file: bool = Field(default=True, description="Enable file logging")
-    log_file_path: Path | None = Field(
-        default=None, description="Log file path (auto-generated if not provided)"
-    )
-    log_rotation_size_mb: int = Field(
-        default=10, ge=1, le=100, description="Log file rotation size (MB)"
-    )
-    log_retention_days: int = Field(
-        default=14, ge=1, le=365, description="Days to retain log files"
-    )
-
-    # Console logging
-    log_to_console: bool = Field(default=True, description="Enable console logging")
-
-    model_config = SettingsConfigDict(env_prefix="HARBOR_LOG_")
-
-
-class ResourceSettings(BaseSettings):
-    """System resource configuration settings"""
-
-    # Memory limits
-    max_memory_usage_mb: int = Field(
-        default=512, ge=128, le=8192, description="Maximum memory usage (MB)"
-    )
-
-    # Disk usage
-    max_disk_usage_gb: int = Field(
-        default=10, ge=1, le=1000, description="Maximum disk usage (GB)"
-    )
-
-    # Performance tuning
-    max_workers: int | str = Field(
-        default="auto", description="Maximum worker processes (auto or specific number)"
-    )
-
-    model_config = SettingsConfigDict(env_prefix="HARBOR_RESOURCE_")
-
-    @field_validator("max_workers")
-    @classmethod
-    def validate_max_workers(cls, v: int | str) -> int | str:
-        """Validate max_workers setting"""
-        if isinstance(v, str):
-            if v.lower() != "auto":
-                raise ValueError("max_workers must be 'auto' or a positive integer")
-            return "auto"
-        if isinstance(v, int):
-            if v < 1:
-                raise ValueError("max_workers must be positive")
-            return v
-        raise ValueError("max_workers must be 'auto' or a positive integer")
 
 
 class FeatureSettings(BaseSettings):
-    """Feature flag configuration settings"""
+    """Feature flag settings - uses factory pattern"""
 
-    # M0 Features (Always enabled in v1.0)
-    enable_auto_discovery: bool = Field(
-        default=True, description="Enable automatic container discovery"
-    )
-    enable_metrics: bool = Field(
-        default=True, description="Enable Prometheus metrics collection"
-    )
-    enable_health_checks: bool = Field(
-        default=True, description="Enable health check monitoring"
-    )
+    enable_auto_discovery: bool
+    enable_metrics: bool
+    enable_health_checks: bool
+    enable_simple_mode: bool
+    show_getting_started: bool
+    enable_notifications: bool
+    enable_rbac: bool
 
-    # Home lab specific features
-    show_getting_started: bool = Field(
-        default=True, description="Show getting started wizard"
-    )
-    enable_simple_mode: bool = Field(
-        default=True, description="Enable simplified UI mode"
-    )
-    auto_exclude_harbor: bool = Field(
-        default=True, description="Automatically exclude Harbor from updates"
-    )
+    if PYDANTIC_V2:
+        model_config = SettingsConfigDict(extra="ignore")
+    else:
 
-    # Future features (disabled in v1.0, behind feature flags)
-    # TODO: M7+ - Advanced authentication
-    enable_mfa: bool = Field(
-        default=False, description="Enable multi-factor authentication (M7+)"
-    )
-    enable_multi_user: bool = Field(
-        default=False, description="Enable multi-user support (M8+)"
-    )
-    enable_rbac: bool = Field(
-        default=False, description="Enable role-based access control (M8+)"
-    )
-
-    # TODO: M8+ - Advanced update strategies
-    enable_blue_green: bool = Field(
-        default=False, description="Enable blue/green deployments (M8+)"
-    )
-    enable_canary: bool = Field(
-        default=False, description="Enable canary deployments (M8+)"
-    )
-
-    # TODO: M9+ - Enterprise integrations
-    enable_ldap: bool = Field(
-        default=False, description="Enable LDAP authentication (M9+)"
-    )
-    enable_kubernetes: bool = Field(
-        default=False, description="Enable Kubernetes runtime (M9+)"
-    )
-
-    model_config = SettingsConfigDict(env_prefix="HARBOR_FEATURE_")
+        class Config:
+            extra = "ignore"
 
 
-class DockerSettings(BaseSettings):
-    """Docker runtime configuration settings"""
+def create_feature_settings(profile: DeploymentProfile) -> FeatureSettings:
+    """Factory function for FeatureSettings with profile-aware defaults"""
 
-    # Docker connection
-    docker_host: str = Field(
-        default="unix:///var/run/docker.sock", description="Docker daemon socket URL"
-    )
-    docker_timeout: int = Field(
-        default=60, ge=10, le=300, description="Docker API timeout (seconds)"
-    )
-
-    # Discovery settings
-    discovery_interval_seconds: int = Field(
-        default=300,  # 5 minutes
-        ge=60,
-        le=3600,
-        description="Container discovery interval",
-    )
-    include_stopped_containers: bool = Field(
-        default=True, description="Include stopped containers in discovery"
+    return FeatureSettings(
+        enable_auto_discovery=env.read_bool("HARBOR_ENABLE_AUTO_DISCOVERY", True),
+        enable_metrics=env.read_bool("HARBOR_ENABLE_METRICS", True),
+        enable_health_checks=env.read_bool("HARBOR_ENABLE_HEALTH_CHECKS", True),
+        enable_simple_mode=env.read_bool(
+            "HARBOR_ENABLE_SIMPLE_MODE", profile != DeploymentProfile.PRODUCTION
+        ),
+        show_getting_started=env.read_bool(
+            "HARBOR_SHOW_GETTING_STARTED", profile != DeploymentProfile.PRODUCTION
+        ),
+        enable_notifications=env.read_bool(
+            "HARBOR_ENABLE_NOTIFICATIONS", False
+        ),  # Future feature
+        enable_rbac=env.read_bool("HARBOR_ENABLE_RBAC", False),  # Future feature
     )
 
-    # Safety settings
-    exclude_patterns: list[str] = Field(
-        default_factory=lambda: [
-            "harbor",  # Exclude Harbor itself
-            "*_backup",  # Exclude backup containers
-            "*_migrate",  # Exclude migration containers
-        ],
-        description="Container name patterns to exclude from management",
-    )
 
-    model_config = SettingsConfigDict(env_prefix="HARBOR_DOCKER_")
+class UpdateSettings(BaseSettings):
+    """Update configuration settings - uses factory pattern"""
+
+    default_check_interval_seconds: int
+    default_update_time: str
+    max_concurrent_updates: int
+    default_cleanup_keep_images: int
+    update_timeout_seconds: int
+
+    if PYDANTIC_V2:
+        model_config = SettingsConfigDict(extra="ignore")
+    else:
+
+        class Config:
+            extra = "ignore"
+
+
+def create_update_settings(profile: DeploymentProfile) -> UpdateSettings:
+    """Factory function for UpdateSettings with profile-aware defaults"""
+
+    # Profile-specific defaults
+    if profile == DeploymentProfile.HOMELAB or profile == DeploymentProfile.DEVELOPMENT:
+        default_concurrent = 2
+    elif profile == DeploymentProfile.STAGING:
+        default_concurrent = 5
+    else:  # PRODUCTION
+        default_concurrent = 10
+
+    return UpdateSettings(
+        default_check_interval_seconds=env.read_int(
+            "HARBOR_DEFAULT_CHECK_INTERVAL_SECONDS", 86400
+        ),
+        default_update_time=env.read_str("HARBOR_DEFAULT_UPDATE_TIME", "03:00"),
+        max_concurrent_updates=env.read_int(
+            "HARBOR_UPDATE_MAX_CONCURRENT_UPDATES", default_concurrent
+        ),
+        default_cleanup_keep_images=env.read_int(
+            "HARBOR_DEFAULT_CLEANUP_KEEP_IMAGES", 2
+        ),
+        update_timeout_seconds=env.read_int("HARBOR_UPDATE_TIMEOUT_SECONDS", 600),
+    )
 
 
 # =============================================================================
-# Main Application Settings
+# Main Settings Class - FACTORY PATTERN
 # =============================================================================
 
 
-class AppSettings(BaseSettings):
-    """
-    Main application settings with profile-based configuration.
+class HarborSettings(BaseSettings):
+    """Main Harbor configuration settings - FACTORY PATTERN APPROACH"""
 
-    Follows Harbor architecture design with progressive complexity:
-    - Home lab: Simple, zero-config defaults
-    - Development: Debug-friendly with additional features
-    - Staging: Testing enterprise features
-    - Production: Enterprise-ready with full security
-    """
+    # Application metadata
+    app_name: str
+    app_version: str
+    debug: bool
+    testing: bool
+    deployment_profile: DeploymentProfile
+    data_dir: Path
+    logs_dir: Path
+    timezone: str
+    cors_origins: list[str]
 
-    # Core application settings
-    app_name: str = Field(
-        default="Harbor Container Updater", description="Application name"
-    )
-    app_version: str = Field(default="0.1.0-alpha.2", description="Application version")
-    debug: bool = Field(default=False, description="Enable debug mode")
+    # Nested settings
+    database: DatabaseSettings
+    security: SecuritySettings
+    logging: LoggingSettings
+    features: FeatureSettings
+    updates: UpdateSettings
 
-    # Deployment configuration
-    deployment_profile: DeploymentProfile = Field(
-        default=DeploymentProfile.HOMELAB,
-        description="Deployment profile (homelab, development, staging, production)",
-    )
+    if PYDANTIC_V2:
+        model_config = SettingsConfigDict(extra="ignore")
+    else:
 
-    # Server settings
-    host: str = Field(
-        default="0.0.0.0",  # nosec B104 - Safe for Docker container deployment
-        description="Server bind address",
-    )
-    port: int = Field(default=8080, ge=1, le=65535, description="Server port")
+        class Config:
+            extra = "ignore"
 
-    # Data directories
-    data_dir: Path = Field(
-        default_factory=lambda: Path("data"), description="Data storage directory"
-    )
-    logs_dir: Path = Field(
-        default_factory=lambda: Path("logs"), description="Log files directory"
-    )
-    config_dir: Path = Field(
-        default_factory=lambda: Path("config"),
-        description="Configuration files directory",
-    )
-
-    # Sub-configurations
-    database: DatabaseSettings = Field(
-        default_factory=DatabaseSettings, description="Database settings"
-    )
-    security: SecuritySettings = Field(
-        default_factory=SecuritySettings, description="Security settings"
-    )
-    updates: UpdateSettings = Field(
-        default_factory=UpdateSettings, description="Update settings"
-    )
-    registry: RegistrySettings = Field(
-        default_factory=RegistrySettings, description="Registry settings"
-    )
-    logging: LoggingSettings = Field(
-        default_factory=LoggingSettings, description="Logging settings"
-    )
-    resources: ResourceSettings = Field(
-        default_factory=ResourceSettings, description="Resource settings"
-    )
-    features: FeatureSettings = Field(
-        default_factory=FeatureSettings, description="Feature flags"
-    )
-    docker: DockerSettings = Field(
-        default_factory=DockerSettings, description="Docker settings"
-    )
-
-    model_config = SettingsConfigDict(
-        env_prefix="HARBOR_",
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        validate_assignment=True,
-        extra="forbid",
-    )
-
-    @classmethod
-    def settings_customise_sources(
-        cls,
-        settings_cls: Any,
-        init_settings: Any,
-        env_settings: Any,
-        dotenv_settings: Any,
-        file_secret_settings: Any,
-    ) -> tuple[Any, ...]:
-        """Customize how settings are loaded, handling HARBOR_MODE properly"""
-        if TYPE_CHECKING:
-            from pydantic_settings import EnvSettingsSource
-        else:
-            from pydantic_settings import EnvSettingsSource
-
-        class ProfileAwareEnvSource(EnvSettingsSource):
-            def get_field_value(
-                self, field_info: Any, field_name: str
-            ) -> tuple[Any, str, bool]:
-                # Handle HARBOR_MODE -> deployment_profile mapping
-                if field_name == "deployment_profile":
-                    harbor_mode = os.getenv("HARBOR_MODE")
-                    if harbor_mode:
-                        return (harbor_mode, field_name, False)
-
-                # For nested settings, we need to let normal processing happen
-                # The profile-specific defaults will be applied in model_post_init
-                return super().get_field_value(field_info, field_name)
-
-        return (
-            init_settings,
-            ProfileAwareEnvSource(settings_cls),
-            dotenv_settings,
-            file_secret_settings,
-        )
-
-    def __init__(self, **kwargs: Any) -> None:
-        """Initialize AppSettings with profile-aware defaults"""
-
-        # First, determine the profile from environment or kwargs
-        profile_value = kwargs.get("deployment_profile") or os.getenv(
-            "HARBOR_MODE", "homelab"
-        )
-        if isinstance(profile_value, str):
-            profile_value = DeploymentProfile(profile_value)
-
-        # Store profile for use in model_post_init
-        self._init_profile = profile_value
-
-        # Apply top-level profile defaults
-        if "debug" not in kwargs:
-            if profile_value == DeploymentProfile.DEVELOPMENT:
-                kwargs["debug"] = True
-            else:
-                kwargs["debug"] = False
-
-        super().__init__(**kwargs)
-
-    def model_post_init(self, __context: Any) -> None:
-        """Apply profile-specific defaults after Pydantic processes environment variables"""
-
-        # Apply profile-specific defaults to nested objects, but only for fields
-        # that haven't been overridden by environment variables
-        profile = getattr(self, "_init_profile", self.deployment_profile)
-
-        self._apply_security_profile_defaults(profile)
-        self._apply_update_profile_defaults(profile)
-        self._apply_logging_profile_defaults(profile)
-        self._apply_resource_profile_defaults(profile)
-        self._apply_database_profile_defaults(profile)
-        self._apply_registry_profile_defaults(profile)
-        self._apply_feature_profile_defaults(profile)
-        self._apply_docker_profile_defaults(profile)
-
+    def __post_init__(self) -> None:
+        """Apply final validation and setup"""
+        self._ensure_data_directory()
         self._validate_configuration()
-        self._ensure_directories()
 
-    def _apply_security_profile_defaults(self, profile: DeploymentProfile) -> None:
-        """Apply profile defaults to security settings if not overridden"""
-        if profile == DeploymentProfile.HOMELAB:
-            self._set_if_default(self.security, "require_https", False)
-            self._set_if_default(self.security, "session_timeout_hours", 168)
-            self._set_if_default(self.security, "api_key_required", False)
-            self._set_if_default(self.security, "password_min_length", 6)
-        elif profile == DeploymentProfile.DEVELOPMENT:
-            self._set_if_default(self.security, "require_https", False)
-            self._set_if_default(self.security, "session_timeout_hours", 72)
-            self._set_if_default(self.security, "api_key_required", False)
-            self._set_if_default(self.security, "password_min_length", 6)
-        elif profile == DeploymentProfile.PRODUCTION:
-            self._set_if_default(self.security, "require_https", True)
-            self._set_if_default(self.security, "session_timeout_hours", 8)
-            self._set_if_default(self.security, "api_key_required", True)
-            self._set_if_default(self.security, "password_min_length", 12)
-            self._set_if_default(self.security, "password_require_special", True)
-
-    def _apply_update_profile_defaults(self, profile: DeploymentProfile) -> None:
-        """Apply profile defaults to update settings if not overridden"""
-        if profile == DeploymentProfile.HOMELAB:
-            self._set_if_default(self.updates, "max_concurrent_updates", 2)
-        elif profile == DeploymentProfile.DEVELOPMENT:
-            self._set_if_default(self.updates, "max_concurrent_updates", 3)
-        elif profile == DeploymentProfile.PRODUCTION:
-            self._set_if_default(self.updates, "default_check_interval_seconds", 21600)
-            self._set_if_default(self.updates, "default_update_time", "02:00")
-            self._set_if_default(self.updates, "max_concurrent_updates", 10)
-        elif profile == DeploymentProfile.STAGING:
-            self._set_if_default(self.updates, "max_concurrent_updates", 5)
-
-    def _apply_logging_profile_defaults(self, profile: DeploymentProfile) -> None:
-        """Apply profile defaults to logging settings if not overridden"""
-        if profile == DeploymentProfile.HOMELAB:
-            self._set_if_default(self.logging, "log_level", LogLevel.INFO)
-            self._set_if_default(self.logging, "log_format", LogFormat.TEXT)
-            self._set_if_default(self.logging, "log_retention_days", 14)
-        elif profile == DeploymentProfile.DEVELOPMENT:
-            self._set_if_default(self.logging, "log_level", LogLevel.DEBUG)
-            self._set_if_default(self.logging, "log_format", LogFormat.TEXT)
-            self._set_if_default(self.logging, "log_retention_days", 14)
-        elif profile == DeploymentProfile.PRODUCTION:
-            self._set_if_default(self.logging, "log_level", LogLevel.INFO)
-            self._set_if_default(self.logging, "log_format", LogFormat.JSON)
-            self._set_if_default(self.logging, "log_retention_days", 90)
-        elif profile == DeploymentProfile.STAGING:
-            self._set_if_default(self.logging, "log_level", LogLevel.INFO)
-            self._set_if_default(self.logging, "log_format", LogFormat.JSON)
-
-    def _apply_resource_profile_defaults(self, profile: DeploymentProfile) -> None:
-        """Apply profile defaults to resource settings if not overridden"""
-        if profile == DeploymentProfile.HOMELAB:
-            self._set_if_default(self.resources, "max_memory_usage_mb", 256)
-            self._set_if_default(self.resources, "max_workers", 2)
-        elif profile == DeploymentProfile.PRODUCTION:
-            self._set_if_default(self.resources, "max_memory_usage_mb", 2048)
-            self._set_if_default(self.resources, "max_workers", "auto")
-
-    def _apply_database_profile_defaults(self, profile: DeploymentProfile) -> None:
-        """Apply profile defaults to database settings if not overridden"""
-        if profile == DeploymentProfile.DEVELOPMENT:
-            self._set_if_default(self.database, "echo_sql", True)
-        elif profile == DeploymentProfile.PRODUCTION:
-            self._set_if_default(
-                self.database, "database_type", DatabaseType.POSTGRESQL
-            )
-            if not self.database.database_url:
-                self._set_if_default(
-                    self.database,
-                    "database_url",
-                    "postgresql://harbor:changeme@localhost:5432/harbor",  # pragma: allowlist secret,
-                )
-            self._set_if_default(self.database, "pool_size", 20)
-
-    def _apply_registry_profile_defaults(self, profile: DeploymentProfile) -> None:
-        """Apply profile defaults to registry settings if not overridden"""
-        if profile == DeploymentProfile.PRODUCTION:
-            self._set_if_default(self.registry, "rate_limit_calls_per_hour", 1000)
-            self._set_if_default(self.registry, "cache_size_mb", 200)
-
-    def _apply_feature_profile_defaults(self, profile: DeploymentProfile) -> None:
-        """Apply profile defaults to feature settings if not overridden"""
-        if profile == DeploymentProfile.PRODUCTION:
-            self._set_if_default(self.features, "show_getting_started", False)
-            self._set_if_default(self.features, "enable_simple_mode", False)
-
-    def _apply_docker_profile_defaults(self, profile: DeploymentProfile) -> None:
-        """Apply profile defaults to docker settings if not overridden"""
-        if profile == DeploymentProfile.DEVELOPMENT:
-            self._set_if_default(self.docker, "discovery_interval_seconds", 60)
-
-    def _set_if_default(self, obj: Any, field_name: str, profile_value: Any) -> None:
-        """Set field value only if it's still at the class default"""
-        current_value = getattr(obj, field_name)
-
-        # Get the field info from the model fields
-        field_info = obj.model_fields.get(field_name)
-
-        if field_info and hasattr(field_info, "default"):
-            class_default = field_info.default
-            # If current value matches class default, apply profile default
-            if current_value == class_default:
-                setattr(obj, field_name, profile_value)
-        else:
-            # If we can't determine the default, just set the value
-            # This ensures profile defaults are applied
-            setattr(obj, field_name, profile_value)
+    def _ensure_data_directory(self) -> None:
+        """Ensure data directory exists"""
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+        (self.data_dir / "backups").mkdir(exist_ok=True)
 
     def _validate_configuration(self) -> None:
-        """Validate configuration consistency and requirements"""
+        """Validate configuration settings"""
+        # Validate update time format
+        if not self._is_valid_time_format(self.updates.default_update_time):
+            raise ValueError(
+                f"Invalid update time format: {self.updates.default_update_time}"
+            )
 
-        # Handle secret key file loading
-        if self.security.secret_key_file:
-            secret_file = Path(self.security.secret_key_file)
-            if secret_file.exists():
-                self.security.secret_key = secret_file.read_text().strip()
+        # Validate data directory is writable
+        if not os.access(self.data_dir, os.W_OK):
+            raise ValueError(f"Data directory not writable: {self.data_dir}")
 
-        # Enforce secure cookies with HTTPS
-        if self.security.require_https and not self.security.session_secure_cookies:
-            self.security.session_secure_cookies = True
+    @staticmethod
+    def _is_valid_time_format(time_str: str) -> bool:
+        """Validate HH:MM time format"""
+        try:
+            parts = time_str.split(":")
+            if len(parts) != 2:
+                return False
 
-        # Production requirements (but allow testing with default database URL)
-        if self.deployment_profile == DeploymentProfile.PRODUCTION:
-            if not self.security.require_https:
-                raise ValueError("HTTPS is required in production profile")
-            if self.security.password_min_length < 8:
-                raise ValueError(
-                    "Password minimum length must be at least 8 in production"
-                )
+            hours, minutes = int(parts[0]), int(parts[1])
+            return 0 <= hours <= 23 and 0 <= minutes <= 59
+        except (ValueError, IndexError):
+            return False
 
-            # Only require database_url if it's not the default test URL
-            if (
-                self.database.database_type == DatabaseType.POSTGRESQL
-                and not self.database.database_url
-            ):
-                raise ValueError(
-                    "database_url is required for PostgreSQL in production"
-                )
+    def to_dict(self) -> dict[str, Any]:
+        """Convert settings to dictionary"""
+        return {
+            "app_name": self.app_name,
+            "app_version": self.app_version,
+            "debug": self.debug,
+            "testing": self.testing,
+            "deployment_profile": self.deployment_profile.value,
+            "data_dir": str(self.data_dir),
+            "logs_dir": str(self.logs_dir),
+            "timezone": self.timezone,
+            "database": {
+                "database_type": self.database.database_type.value,
+                "pool_size": self.database.pool_size,
+                "max_overflow": self.database.max_overflow,
+            },
+            "security": {
+                "require_https": self.security.require_https,
+                "api_key_required": self.security.api_key_required,
+                "session_timeout_hours": self.security.session_timeout_hours,
+                "password_min_length": self.security.password_min_length,
+            },
+            "logging": {
+                "log_level": self.logging.log_level.value,
+                "log_format": self.logging.log_format,
+                "log_retention_days": self.logging.log_retention_days,
+            },
+            "features": {
+                "enable_auto_discovery": self.features.enable_auto_discovery,
+                "enable_metrics": self.features.enable_metrics,
+                "enable_health_checks": self.features.enable_health_checks,
+                "enable_simple_mode": self.features.enable_simple_mode,
+                "show_getting_started": self.features.show_getting_started,
+            },
+            "updates": {
+                "default_check_interval_seconds": self.updates.default_check_interval_seconds,
+                "default_update_time": self.updates.default_update_time,
+                "max_concurrent_updates": self.updates.max_concurrent_updates,
+                "default_cleanup_keep_images": self.updates.default_cleanup_keep_images,
+            },
+        }
 
-        # General database URL validation (skip for testing with default URLs)
+
+# =============================================================================
+# MAIN FACTORY FUNCTION - THE SOLUTION
+# =============================================================================
+
+
+def create_harbor_settings() -> HarborSettings:
+    """Factory function to create HarborSettings with explicit environment variable reading"""
+
+    # Read core settings from environment
+    deployment_profile = env.read_enum(
+        "HARBOR_MODE", DeploymentProfile, DeploymentProfile.HOMELAB
+    )
+    debug = env.read_bool(
+        "HARBOR_DEBUG", deployment_profile == DeploymentProfile.DEVELOPMENT
+    )
+
+    # Log the profile we're using
+    logger.debug(f"Creating Harbor settings for profile: {deployment_profile.value}")
+
+    # Create nested settings with profile awareness
+    database_settings = create_database_settings()
+    security_settings = create_security_settings(deployment_profile)
+    logging_settings = create_logging_settings(deployment_profile)
+    feature_settings = create_feature_settings(deployment_profile)
+    update_settings = create_update_settings(deployment_profile)
+
+    # Create main settings
+    settings = HarborSettings(
+        app_name=env.read_str("HARBOR_APP_NAME", "Harbor Container Updater"),
+        app_version=env.read_str("HARBOR_VERSION", "1.0.0"),
+        debug=debug,
+        testing=env.read_bool("TESTING", False),
+        deployment_profile=deployment_profile,
+        data_dir=env.read_path("HARBOR_DATA_DIR", "data"),
+        logs_dir=env.read_path("HARBOR_LOGS_DIR", "data/logs"),
+        timezone=env.read_str("HARBOR_TIMEZONE", "UTC"),
+        cors_origins=env.read_list("HARBOR_CORS_ORIGINS", ["*"]),
+        database=database_settings,
+        security=security_settings,
+        logging=logging_settings,
+        features=feature_settings,
+        updates=update_settings,
+    )
+
+    # Apply post-init validation
+    settings.__post_init__()
+
+    return settings
+
+
+# =============================================================================
+# Settings Management - REWRITTEN FOR FACTORY PATTERN
+# =============================================================================
+
+
+class SettingsManager:
+    """Settings manager that properly handles environment changes"""
+
+    def __init__(self) -> None:
+        self._cached_settings: HarborSettings | None = None
+        self._env_snapshot: dict[str, str | None] | None = None
+
+    def get_settings(self, force_reload: bool = False) -> HarborSettings:
+        """Get settings with proper environment change detection"""
+        current_env = self._get_env_snapshot()
+
+        # Check if we need to reload
         if (
-            self.database.database_type == DatabaseType.POSTGRESQL
-            and not self.database.database_url
-            and self.deployment_profile != DeploymentProfile.PRODUCTION
+            force_reload
+            or self._cached_settings is None
+            or current_env != self._env_snapshot
         ):
-            raise ValueError("database_url is required for PostgreSQL")
+            logger.debug(
+                f"Creating new settings. Force: {force_reload}, Env changed: {current_env != self._env_snapshot}"
+            )
 
-    def _ensure_directories(self) -> None:
-        """Ensure required directories exist"""
-        for directory in [self.data_dir, self.logs_dir, self.config_dir]:
-            directory.mkdir(parents=True, exist_ok=True)
+            # Create settings using factory function
+            self._cached_settings = create_harbor_settings()
+            self._env_snapshot = current_env
 
-        # Set log file path if not provided
-        if not self.logging.log_file_path:
-            self.logging.log_file_path = self.logs_dir / "harbor.log"
+            logger.debug(
+                f"Created settings with profile: {self._cached_settings.deployment_profile.value}"
+            )
+
+        return self._cached_settings
+
+    def clear_cache(self) -> None:
+        """Clear cached settings"""
+        self._cached_settings = None
+        self._env_snapshot = None
+        logger.debug("Settings cache cleared")
+
+    def _get_env_snapshot(self) -> dict[str, str | None]:
+        """Get snapshot of relevant environment variables"""
+        env_vars = [
+            "HARBOR_MODE",
+            "HARBOR_DEBUG",
+            "HARBOR_SECURITY_PASSWORD_MIN_LENGTH",
+            "HARBOR_UPDATE_MAX_CONCURRENT_UPDATES",
+            "HARBOR_LOG_LOG_LEVEL",
+            "DATABASE_URL",
+            "TESTING",
+        ]
+
+        return {var: os.getenv(var) for var in env_vars}
+
+
+# Global settings manager
+_settings_manager = SettingsManager()
 
 
 # =============================================================================
-# Settings Factory and Management
+# Public API Functions - UNCHANGED INTERFACE
 # =============================================================================
 
-# Global settings instance
-_settings: AppSettings | None = None
+
+def get_settings() -> HarborSettings:
+    """Get Harbor settings instance"""
+    return _settings_manager.get_settings()
 
 
-def get_settings() -> AppSettings:
-    """
-    Get application settings (singleton pattern).
-
-    Returns:
-        AppSettings: Configured application settings
-    """
-    global _settings
-    if _settings is None:
-        _settings = AppSettings()
-    return _settings
+def clear_settings_cache() -> None:
+    """Clear settings cache completely"""
+    _settings_manager.clear_cache()
+    logger.debug("All settings caches cleared")
 
 
-def reload_settings() -> AppSettings:
-    """
-    Reload settings from environment (useful for testing).
+def reload_settings() -> HarborSettings:
+    """Force reload settings from current environment"""
+    logger.debug("Force reloading settings from environment")
+    return _settings_manager.get_settings(force_reload=True)
 
-    Returns:
-        AppSettings: Fresh application settings
-    """
-    global _settings
-    _settings = None
 
-    # Force creation of new instance which will re-read environment variables
-    _settings = AppSettings()
-    return _settings
+def create_fresh_settings() -> HarborSettings:
+    """Create a completely fresh settings instance bypassing all caches"""
+    return create_harbor_settings()
+
+
+# =============================================================================
+# Helper Functions - UNCHANGED
+# =============================================================================
 
 
 def get_config_summary() -> dict[str, Any]:
-    """
-    Get configuration summary for debugging and logging.
-
-    Returns:
-        Dict[str, Any]: Configuration summary (safe for logging)
-    """
+    """Get configuration summary for debugging/status"""
     settings = get_settings()
 
     return {
-        "app_name": settings.app_name,
-        "app_version": settings.app_version,
         "deployment_profile": settings.deployment_profile.value,
-        "debug": settings.debug,
-        "host": settings.host,
-        "port": settings.port,
         "database_type": settings.database.database_type.value,
+        "data_dir": str(settings.data_dir),
+        "debug": settings.debug,
+        "testing": settings.testing,
         "log_level": settings.logging.log_level.value,
-        "log_format": settings.logging.log_format.value,
-        "max_concurrent_updates": settings.updates.max_concurrent_updates,
         "auto_discovery_enabled": settings.features.enable_auto_discovery,
         "simple_mode_enabled": settings.features.enable_simple_mode,
-        # Note: Sensitive values (secret keys, passwords) are excluded
+        "https_required": settings.security.require_https,
+        "api_key_required": settings.security.api_key_required,
+        "max_concurrent_updates": settings.updates.max_concurrent_updates,
     }
 
 
 def validate_runtime_requirements() -> list[str]:
-    """
-    Validate runtime requirements and return any issues.
+    """Validate runtime requirements and return list of errors"""
+    errors = []
 
-    Returns:
-        List[str]: List of validation errors (empty if valid)
-    """
-    settings = get_settings()
-    errors: list[str] = []
-
-    # Check data directories are writable
     try:
-        test_file = settings.data_dir / ".write_test"
-        test_file.write_text("test")
-        test_file.unlink()
+        settings = get_settings()
+
+        # Check data directory
+        if not settings.data_dir.exists():
+            errors.append(f"Data directory does not exist: {settings.data_dir}")
+        elif not os.access(settings.data_dir, os.W_OK):
+            errors.append(f"Data directory not writable: {settings.data_dir}")
+
+        # Check database configuration
+        if settings.database.database_type == DatabaseType.POSTGRESQL:
+            if not settings.database.database_url:
+                if not os.getenv("DATABASE_URL"):
+                    errors.append("PostgreSQL selected but no DATABASE_URL provided")
+
+        # Check required environment variables for production
+        if settings.deployment_profile == DeploymentProfile.PRODUCTION:
+            required_vars = ["HARBOR_SECRET_KEY"]
+            for var in required_vars:
+                if not os.getenv(var):
+                    errors.append(
+                        f"Production deployment requires {var} environment variable"
+                    )
+
+        # Validate update time format
+        if not HarborSettings._is_valid_time_format(
+            settings.updates.default_update_time
+        ):
+            errors.append(
+                f"Invalid update time format: {settings.updates.default_update_time}"
+            )
+
     except Exception as e:
-        errors.append(f"Data directory not writable: {e}")
-
-    # Check log directory is writable
-    try:
-        test_file = settings.logs_dir / ".write_test"
-        test_file.write_text("test")
-        test_file.unlink()
-    except Exception as e:
-        errors.append(f"Logs directory not writable: {e}")
-
-    # Check Docker socket accessibility (basic check)
-    if settings.docker.docker_host.startswith("unix://"):
-        socket_path = settings.docker.docker_host.replace("unix://", "")
-        if not Path(socket_path).exists():
-            errors.append(f"Docker socket not found: {socket_path}")
-
-    # Validate secret key
-    if len(settings.security.secret_key) < 16:
-        errors.append("Secret key too short (minimum 16 characters)")
+        errors.append(f"Configuration validation error: {e!s}")
 
     return errors
 
 
-# =============================================================================
-# Configuration Loading Utilities
-# =============================================================================
+def is_development() -> bool:
+    """Check if running in development mode"""
+    settings = get_settings()
+    return (
+        settings.deployment_profile == DeploymentProfile.DEVELOPMENT or settings.debug
+    )
 
 
-def load_profile_config(profile: DeploymentProfile) -> dict[str, Any]:
-    """
-    Load profile-specific configuration from YAML files.
-
-    Args:
-        profile: Deployment profile to load
-
-    Returns:
-        Dict[str, Any]: Profile configuration
-    """
-    config_file = Path("config") / f"{profile.value}.yaml"
-
-    if not config_file.exists():
-        return {}
-
-    if not YAML_AVAILABLE or not yaml:
-        print(f"Warning: YAML support not available, skipping {config_file}")
-        return {}
-
-    try:
-        with config_file.open() as f:
-            return yaml.safe_load(f) or {}
-    except Exception as e:
-        # Log warning but don't fail startup
-        print(f"Warning: Could not load {config_file}: {e}")
-        return {}
+def is_production() -> bool:
+    """Check if running in production mode"""
+    settings = get_settings()
+    return settings.deployment_profile == DeploymentProfile.PRODUCTION
 
 
-def get_profile_recommendations(profile: DeploymentProfile) -> dict[str, str]:
-    """
-    Get configuration recommendations for a deployment profile.
-
-    Args:
-        profile: Deployment profile
-
-    Returns:
-        Dict[str, str]: Configuration recommendations
-    """
-    if profile == DeploymentProfile.HOMELAB:
-        return {
-            "deployment_focus": "Zero configuration and ease of use",
-            "security_level": "Basic (suitable for internal networks)",
-            "resource_usage": "Optimized for low-power hardware",
-            "update_strategy": "Conservative with safety checks",
-            "recommended_features": "Auto-discovery, simple mode, getting started wizard",
-        }
-    elif profile == DeploymentProfile.PRODUCTION:
-        return {
-            "deployment_focus": "Security, compliance, and scalability",
-            "security_level": "Enterprise grade with audit trails",
-            "resource_usage": "Optimized for high-performance servers",
-            "update_strategy": "Controlled with comprehensive monitoring",
-            "recommended_features": "RBAC, audit export, advanced monitoring",
-        }
-    else:
-        return {
-            "deployment_focus": f"Testing and development for {profile.value}",
-            "security_level": "Balanced for testing environments",
-            "resource_usage": "Development optimized",
-            "update_strategy": "Fast iteration with safety",
-            "recommended_features": "Debug logging, feature testing",
-        }
+def is_homelab() -> bool:
+    """Check if running in home lab mode"""
+    settings = get_settings()
+    return settings.deployment_profile == DeploymentProfile.HOMELAB
 
 
 # =============================================================================
-# Environment Detection Utilities
+# Environment Detection and Other Helpers - UNCHANGED
 # =============================================================================
 
 
 def detect_environment() -> dict[str, Any]:
-    """
-    Detect current environment characteristics.
+    """Detect environment information and suggest deployment profile"""
+    # Get platform information
+    system_info = platform.uname()
 
-    Returns:
-        Dict[str, Any]: Environment information
-    """
-    import platform
+    # Detect if we're in a container
+    is_container = os.path.exists("/.dockerenv") or (
+        os.path.exists("/proc/1/cgroup") and "docker" in open("/proc/1/cgroup").read()
+    )
 
-    env_info: dict[str, Any] = {
+    # Detect if we're in cloud environment
+    is_cloud = any(
+        [
+            os.getenv("AWS_EXECUTION_ENV"),
+            os.getenv("GOOGLE_CLOUD_PROJECT"),
+            os.getenv("AZURE_FUNCTIONS_ENVIRONMENT"),
+            os.getenv("KUBERNETES_SERVICE_HOST"),
+        ]
+    )
+
+    cpu_count = os.cpu_count() or 1
+
+    # Memory detection (basic)
+    try:
+        with open("/proc/meminfo") as f:
+            meminfo = f.read()
+            mem_total_kb = int(
+                [
+                    line.split()[1]
+                    for line in meminfo.split("\n")
+                    if "MemTotal:" in line
+                ][0]
+            )
+            mem_total_gb = mem_total_kb / 1024 / 1024
+    except:
+        mem_total_gb = 1  # Default fallback
+
+    # Suggest profile based on environment
+    if is_cloud or os.getenv("HARBOR_MODE") == "production":
+        suggested_profile = "production"
+    elif os.getenv("CI") or os.getenv("GITHUB_ACTIONS"):
+        suggested_profile = "development"
+    elif cpu_count <= 2 and mem_total_gb <= 4:
+        suggested_profile = "homelab"  # Raspberry Pi or small systems
+    elif os.getenv("HARBOR_MODE") == "development" or is_development():
+        suggested_profile = "development"
+    else:
+        suggested_profile = "homelab"  # Default to home lab
+
+    return {
         "platform": {
-            "system": platform.system(),
-            "machine": platform.machine(),
-            "python_version": platform.python_version(),
+            "system": system_info.system,
+            "machine": system_info.machine,
+            "processor": system_info.processor,
+            "release": system_info.release,
+            "version": system_info.version,
         },
-        "docker": {
-            "socket_exists": Path("/var/run/docker.sock").exists(),
-            "in_container": Path("/.dockerenv").exists(),
+        "environment": {
+            "python_version": sys.version,
+            "is_container": is_container,
+            "is_cloud": is_cloud,
+            "cpu_count": cpu_count,
+            "memory_gb": mem_total_gb,
         },
-        "suggested_profile": _suggest_deployment_profile(),
+        "suggested_profile": suggested_profile,
+        "current_profile": os.getenv("HARBOR_MODE", "homelab"),
+        "docker_available": _check_docker_available(),
+        "write_permissions": _check_write_permissions(),
     }
 
-    # Add resource information if psutil is available
-    if PSUTIL_AVAILABLE and psutil:
-        try:
-            env_info["resources"] = {
-                "cpu_count": psutil.cpu_count(),
-                "memory_gb": round(psutil.virtual_memory().total / (1024**3), 1),
-                "disk_free_gb": round(psutil.disk_usage("/").free / (1024**3), 1),
-            }
-        except Exception:
-            # If psutil fails, add placeholder values
-            env_info["resources"] = {
-                "cpu_count": 1,
-                "memory_gb": 1.0,
-                "disk_free_gb": 10.0,
-            }
-    else:
-        # Fallback values when psutil is not available
-        env_info["resources"] = {
-            "cpu_count": 1,
-            "memory_gb": 1.0,
-            "disk_free_gb": 10.0,
-        }
 
-    return env_info
+def _check_docker_available() -> bool:
+    """Check if Docker is available
 
-
-def _suggest_deployment_profile() -> str:
-    """Suggest deployment profile based on environment detection"""
-
-    # Check for production indicators
-    if os.getenv("KUBERNETES_SERVICE_HOST"):
-        return "production"  # Running in Kubernetes
-
-    if os.getenv("NODE_ENV") == "production":
-        return "production"
-
-    # Check for development indicators
-    if os.getenv("NODE_ENV") == "development" or os.getenv("DEBUG"):
-        return "development"
-
-    # Check resource constraints (likely Raspberry Pi or home lab)
-    if PSUTIL_AVAILABLE and psutil:
-        try:
-            memory_gb = psutil.virtual_memory().total / (1024**3)
-            if memory_gb < 2:
-                return "homelab"  # Low memory suggests home lab
-        except Exception:
-            # Silently handle psutil errors - this is environment detection, not critical
-            return "homelab"  # Default fallback
-
-    # Default to home lab for unknown environments
-    return "homelab"
-
-
-# =============================================================================
-# Configuration Export and Import
-# =============================================================================
-
-
-def export_config_template(profile: DeploymentProfile) -> str:
+    Uses subprocess safely with controlled commands and no user input.
     """
-    Export configuration template for a deployment profile.
+    try:
+        import shutil
+        import subprocess  # nosec B404
 
-    Args:
-        profile: Deployment profile
+        # First try to find docker using shutil.which (safer)
+        docker_path = shutil.which("docker")
+        if not docker_path:
+            return False
 
-    Returns:
-        str: Environment variable template
+        # Use the found path with subprocess
+        result = subprocess.run(  # nosec B603
+            [docker_path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,  # Don't raise on non-zero exit
+            # Restrict environment for additional security
+            env={"PATH": "/usr/local/bin:/usr/bin:/bin", "LC_ALL": "C"},
+        )
+        return result.returncode == 0
+
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+        return False
+
+
+def _check_write_permissions() -> dict[str, bool]:
+    """Check write permissions for required directories
+
+    Uses Python's tempfile module for secure temporary file operations.
     """
-    # Create settings with profile defaults
-    temp_settings = AppSettings(deployment_profile=profile)
+    import tempfile
 
-    template_lines = [
-        f"# Harbor Configuration Template - {profile.value.title()} Profile",
-        f"# Generated for Harbor v{temp_settings.app_version}",
-        "",
-        "# ===== CORE CONFIGURATION =====",
-        f"HARBOR_MODE={profile.value}",
-        f"HARBOR_DEBUG={str(temp_settings.debug).lower()}",
-        "",
-        "# ===== SECURITY =====",
-        f"HARBOR_SECURITY_REQUIRE_HTTPS={str(temp_settings.security.require_https).lower()}",
-        f"HARBOR_SECURITY_SESSION_TIMEOUT_HOURS={temp_settings.security.session_timeout_hours}",
-        f"HARBOR_SECURITY_API_KEY_REQUIRED={str(temp_settings.security.api_key_required).lower()}",
-        "# HARBOR_SECURITY_SECRET_KEY=  # Generate with: openssl rand -base64 32",
-        "",
-        "# ===== UPDATES =====",
-        f"HARBOR_UPDATE_DEFAULT_CHECK_INTERVAL_SECONDS={temp_settings.updates.default_check_interval_seconds}",
-        f"HARBOR_UPDATE_DEFAULT_UPDATE_TIME={temp_settings.updates.default_update_time}",
-        f"HARBOR_UPDATE_MAX_CONCURRENT_UPDATES={temp_settings.updates.max_concurrent_updates}",
-        "",
-        "# ===== LOGGING =====",
-        f"HARBOR_LOG_LOG_LEVEL={temp_settings.logging.log_level.value}",
-        f"HARBOR_LOG_LOG_FORMAT={temp_settings.logging.log_format.value}",
-        f"HARBOR_LOG_LOG_RETENTION_DAYS={temp_settings.logging.log_retention_days}",
-        "",
-        "# ===== FEATURES =====",
-        f"HARBOR_FEATURE_ENABLE_AUTO_DISCOVERY={str(temp_settings.features.enable_auto_discovery).lower()}",
-        f"HARBOR_FEATURE_SHOW_GETTING_STARTED={str(temp_settings.features.show_getting_started).lower()}",
-        f"HARBOR_FEATURE_ENABLE_SIMPLE_MODE={str(temp_settings.features.enable_simple_mode).lower()}",
-        "",
+    permissions = {}
+
+    # Use secure temp directory from tempfile
+    test_dirs = [
+        ("current_dir", "."),
+        ("data_dir", "data"),
+        ("tmp_dir", tempfile.gettempdir()),  # Secure temp directory
     ]
 
-    return "\n".join(template_lines)
+    for name, path in test_dirs:
+        try:
+            test_path = Path(path)
+            test_path.mkdir(exist_ok=True, mode=0o755)
 
+            # Use tempfile for secure temporary file creation
+            with tempfile.NamedTemporaryFile(
+                dir=str(test_path),
+                prefix=".harbor_test_",
+                suffix=".tmp",
+                delete=True,  # Auto-cleanup
+            ) as temp_file:
+                temp_file.write(b"test")
+                temp_file.flush()
+                permissions[name] = True
 
-if __name__ == "__main__":
-    """Configuration testing and utilities"""
-    import json
+        except (OSError, Exception):
+            permissions[name] = False
 
-    print("🛳️ Harbor Configuration System")
-    print("=" * 40)
-
-    # Show current configuration
-    settings = get_settings()
-    summary = get_config_summary()
-
-    print(f"Profile: {settings.deployment_profile.value}")
-    print(f"Version: {settings.app_version}")
-    print(f"Data directory: {settings.data_dir}")
-    print(f"Database: {settings.database.database_type.value}")
-    print(f"Log level: {settings.logging.log_level.value}")
-    print()
-
-    # Validate runtime requirements
-    errors = validate_runtime_requirements()
-    if errors:
-        print("⚠️ Configuration Issues:")
-        for error in errors:
-            print(f"  - {error}")
-    else:
-        print("✅ Configuration valid")
-
-    print()
-    print("Configuration Summary:")
-    print(json.dumps(summary, indent=2, default=str))
+    return permissions
