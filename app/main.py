@@ -316,7 +316,8 @@ def create_app() -> FastAPI:
                             },
                         }
                     )
-                except Exception:
+                except Exception as config_err:
+                    logger.error(f"Config error in health check: {config_err}")
                     health_data["config_status"] = "error"
 
             # Add database health if available
@@ -332,14 +333,10 @@ def create_app() -> FastAPI:
                     if "size_mb" in db_info:
                         health_data["database"]["size_mb"] = db_info["size_mb"]
 
-                except Exception as e:
-                    logger.error(f"Database health check error: {e}")
-                    health_data["database"] = {
-                        "status": "error",
-                        "error": "Database unavailable"
-                        if not is_development()
-                        else str(e),
-                    }
+                except Exception as db_err:
+                    logger.error(f"Database health check error: {db_err}")
+                    # FIX: Don't expose database error details
+                    health_data["database"] = {"status": "error"}
                     health_data["status"] = "degraded"
 
             # Add timestamp
@@ -350,14 +347,13 @@ def create_app() -> FastAPI:
             return health_data
 
         except Exception as e:
-            logger.error(f"Health check failed: {e}")
+            logger.error(f"Health check failed: {e}", exc_info=True)
 
-            # SECURITY FIX: Don't expose error details in production
+            # FIX: Never expose exception details
             return {
                 "status": "unhealthy",
                 "version": __version__,
                 "milestone": __milestone__,
-                "error": "Health check failed" if not is_development() else str(e),
             }
 
     # Readiness check endpoint with database validation
@@ -390,13 +386,11 @@ def create_app() -> FastAPI:
                 if errors:
                     ready_data["ready"] = False
                     ready_data["config_errors"] = errors
-            except Exception as e:
-                logger.error(f"Config error in readiness check: {e}")
+            except Exception as config_err:
+                logger.error(f"Config error in readiness check: {config_err}")
                 ready_data["ready"] = False
-                # SECURITY FIX: Don't expose error details in production
-                ready_data["config_error"] = (
-                    "Configuration error" if not is_development() else str(e)
-                )
+                # FIX: Don't expose error details
+                ready_data["config_error"] = "configuration check failed"
         else:
             ready_data["ready"] = False
             ready_data["components"]["configuration"] = False
@@ -418,12 +412,11 @@ def create_app() -> FastAPI:
                     ready_data["ready"] = False
                     ready_data["database_error"] = "Essential tables missing"
 
-            except Exception as e:
-                logger.error(f"Database readiness error: {e}")
+            except Exception as db_err:
+                logger.error(f"Database readiness error: {db_err}")
                 ready_data["ready"] = False
-                ready_data["database_error"] = (
-                    "Database check failed" if not is_development() else str(e)
-                )
+                # FIX: Don't expose database error details
+                ready_data["database_error"] = "database check failed"
                 ready_data["components"]["database"] = False
         else:
             ready_data["ready"] = False
@@ -476,13 +469,7 @@ def create_app() -> FastAPI:
 
             except Exception as e:
                 logger.error(f"Database status error: {e}")
-                return {
-                    "status": "error",
-                    "error": "Database status unavailable"
-                    if not is_development()
-                    else str(e),
-                    "milestone": "M0",
-                }
+                return {"status": "error", "milestone": "M0"}
 
         @app.get("/database/health")
         async def database_health() -> dict[str, Any]:
@@ -518,9 +505,6 @@ def create_app() -> FastAPI:
                 return {
                     "status": "unhealthy",
                     "connection": "error",
-                    "error": "Database health check failed"
-                    if not is_development()
-                    else str(e),
                 }
 
     # Basic info endpoint
@@ -625,6 +609,7 @@ def create_app() -> FastAPI:
                     }
                 )
             except Exception:
+                # Silent failure for version info
                 pass
 
         return version_data
@@ -681,9 +666,7 @@ def create_app() -> FastAPI:
 
             except Exception as e:
                 logger.error(f"Security status config error: {e}")
-                security_data["configuration_error"] = (
-                    "Configuration unavailable" if not is_development() else str(e)
-                )
+                security_data["configuration_error"] = "configuration unavailable"
 
         return security_data
 
@@ -728,12 +711,13 @@ def create_app() -> FastAPI:
                         config_summary["database"] = db_info
                     except Exception as e:
                         logger.error(f"Config database info error: {e}")
-                        config_summary["database_error"] = str(e)
+                        # FIX: Don't expose internal error details
+                        config_summary["database_status"] = "unavailable"
 
                 return config_summary
             except Exception as e:
                 logger.error(f"Config info error: {e}")
-                return {"error": str(e)}
+                return {"error": "Configuration information unavailable"}
 
     # Development endpoints for database testing
     if debug_mode and DATABASE_AVAILABLE:
@@ -769,11 +753,13 @@ def create_app() -> FastAPI:
                 return results
 
             except Exception as e:
-                logger.error(f"Database test failed: {e}")
-                # SECURITY FIX: Show full error only in debug mode
+                logger.error(f"Database test failed: {e}", exc_info=True)
+                # FIX: Structure error response properly for test endpoint
                 return {
                     "status": "error",
-                    "error": str(e) if debug_mode else "Database test failed",
+                    "message": "Database test failed",
+                    # Only include details in explicit debug endpoint
+                    "debug_info": str(e)[:100] if debug_mode else None,  # Limit length
                 }
 
     # Security testing endpoint (development only)
@@ -812,11 +798,13 @@ def create_app() -> FastAPI:
                 }
 
             except Exception as e:
-                logger.error(f"Security test failed: {e}")
-                # SECURITY FIX: Show full error only in debug mode
+                logger.error(f"Security test failed: {e}", exc_info=True)
+                # FIX: Structure error response properly for test endpoint
                 return {
                     "status": "error",
-                    "error": str(e) if debug_mode else "Security test failed",
+                    "message": "Security test failed",
+                    # Only include limited debug info in explicit test endpoint
+                    "debug_info": str(e)[:100] if debug_mode else None,  # Limit length
                 }
 
     return app
