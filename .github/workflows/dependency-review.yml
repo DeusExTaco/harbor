@@ -45,11 +45,9 @@ jobs:
           # Allow moderate vulnerabilities during M0 development
           fail-on-severity: high
 
-          # Allow only valid SPDX license identifiers for common open source licenses
-          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, GPL-3.0, PSF-2.0, Python-2.0, 0BSD
-
-          # Deny problematic licenses using valid SPDX identifiers
-          deny-licenses: GPL-2.0, AGPL-3.0, LGPL-2.1
+          # Allow only permissive licenses (using proper SPDX identifiers)
+          # Removed deny-licenses to fix the conflict error
+          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, PSF-2.0, Python-2.0, 0BSD
 
           # Comment summary in PR only on failure to reduce noise
           comment-summary-in-pr: on-failure
@@ -384,7 +382,7 @@ jobs:
         run: |
           echo "🔍 Validating license compliance..."
 
-          # Define allowed licenses (permissive only)
+          # Define allowed licenses (permissive only) - matching dependency-review action
           ALLOWED_LICENSES="MIT|Apache|BSD|ISC|Python|PSF"
 
           # Check for problematic licenses
@@ -478,7 +476,7 @@ jobs:
               echo "- ❌ **GitHub Dependency Review**: Failed" >> dependency-summary.md
             fi
           else
-            echo "- ⏭️ **GitHub Dependency Review**: Skipped (not a PR)" >> dependency-summary.md
+            echo "- ⭐️ **GitHub Dependency Review**: Skipped (not a PR)" >> dependency-summary.md
           fi
 
           # Security Scan
@@ -522,8 +520,8 @@ jobs:
           echo "## 📄 Reports Available" >> dependency-summary.md
           echo "" >> dependency-summary.md
           echo "The following detailed reports are available as workflow artifacts:" >> dependency-summary.md
-          echo "- `security-scan-reports-${{ github.run_id }}` - Vulnerability scan results" >> dependency-summary.md
-          echo "- `license-reports-${{ github.run_id }}` - License compliance analysis" >> dependency-summary.md
+          echo "- \`security-scan-reports-${{ github.run_id }}\` - Vulnerability scan results" >> dependency-summary.md
+          echo "- \`license-reports-${{ github.run_id }}\` - License compliance analysis" >> dependency-summary.md
           echo "" >> dependency-summary.md
 
           # Display the summary
