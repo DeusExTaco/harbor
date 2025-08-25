@@ -327,20 +327,31 @@ jobs:
 
       - name: Check version consistency
         run: |
+          echo "📦 Checking project version consistency..."
+
+          # Check pyproject.toml version using simple grep
           if [ -f "pyproject.toml" ]; then
-            python -c "
-            try:
-                import tomllib
-                with open('pyproject.toml', 'rb') as f:
-                    data = tomllib.load(f)
-                version = data['project']['version']
-                print(f'Project version: {version}')
-            except:
-                print('Could not read version from pyproject.toml')
-            "
+            echo "Checking pyproject.toml..."
+            PROJ_VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/' || echo "unknown")
+            echo "Project version: $PROJ_VERSION"
           else
             echo "No pyproject.toml found"
           fi
+
+          # Check app/__init__.py version
+          if [ -f "app/__init__.py" ]; then
+            echo "Checking app/__init__.py..."
+            APP_VERSION=$(grep '__version__ = ' app/__init__.py | sed 's/__version__ = "\(.*\)"/\1/' || echo "unknown")
+            echo "App version: $APP_VERSION"
+
+            MILESTONE=$(grep '__milestone__ = ' app/__init__.py | sed 's/__milestone__ = "\(.*\)"/\1/' || echo "unknown")
+            echo "App milestone: $MILESTONE"
+          else
+            echo "No app/__init__.py found"
+          fi
+
+          echo "✅ Version check completed (detailed validation happens in release process)"
+
 
       - name: Deployment readiness summary
         run: |

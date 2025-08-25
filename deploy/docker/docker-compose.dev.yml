@@ -2,7 +2,7 @@
 # Located: deploy/docker/docker-compose.dev.yml
 # Complete development environment with hot reload, debugging, and services
 
-version: '3.8'
+version: "3.8"
 
 services:
   # =============================================================================
@@ -10,20 +10,20 @@ services:
   # =============================================================================
   harbor-dev:
     build:
-      context: ../..  # Build from project root
+      context: ../.. # Build from project root
       dockerfile: deploy/docker/Dockerfile.dev
       args:
         - DEV_MODE=true
     container_name: harbor-dev
     restart: unless-stopped
     ports:
-      - "8080:8080"    # Main application
-      - "5678:5678"    # Debug port (debugpy)
+      - "8080:8080" # Main application
+      - "5678:5678" # Debug port (debugpy)
     volumes:
       # Source code mounting for hot reload (from project root)
       - ../..:/app
-      - /app/__pycache__        # Exclude pycache
-      - /app/.pytest_cache      # Exclude pytest cache
+      - /app/__pycache__ # Exclude pycache
+      - /app/.pytest_cache # Exclude pytest cache
 
       # Docker socket for container discovery (read-only)
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -58,19 +58,19 @@ services:
 
       # Development-specific settings
       - MAX_CONCURRENT_UPDATES=1
-      - DEFAULT_CHECK_INTERVAL_SECONDS=300  # 5 minutes for testing
-      - REGISTRY_CACHE_TTL=300              # 5 minutes for testing
+      - DEFAULT_CHECK_INTERVAL_SECONDS=300 # 5 minutes for testing
+      - REGISTRY_CACHE_TTL=300 # 5 minutes for testing
 
       # Security (relaxed for development)
       - REQUIRE_HTTPS=false
-      - SESSION_TIMEOUT_HOURS=168           # 1 week
-      - API_RATE_LIMIT_PER_HOUR=10000      # High limit for dev
+      - SESSION_TIMEOUT_HOURS=168 # 1 week
+      - API_RATE_LIMIT_PER_HOUR=10000 # High limit for dev
 
       # Performance (optimized for development)
       - DATABASE_POOL_SIZE=3
       - HARBOR_MAX_WORKERS=2
     labels:
-      - "harbor.exclude=true"               # Don't update Harbor itself
+      - "harbor.exclude=true" # Don't update Harbor itself
       - "com.harbor.environment=development"
       - "com.harbor.service=main-app"
     networks:
@@ -98,7 +98,7 @@ services:
       - ../../config/redis-dev.conf:/usr/local/etc/redis/redis.conf
     command: redis-server /usr/local/etc/redis/redis.conf
     environment:
-      - REDIS_PASSWORD=dev_password_123  # pragma: allowlist secret
+      - REDIS_PASSWORD=dev_password_123 # pragma: allowlist secret
     labels:
       - "harbor.exclude=true"
       - "com.harbor.environment=development"
@@ -126,7 +126,7 @@ services:
     environment:
       - POSTGRES_DB=harbor_dev
       - POSTGRES_USER=harbor_dev
-      - POSTGRES_PASSWORD=dev_password_123  # pragma: allowlist secret
+      - POSTGRES_PASSWORD=dev_password_123 # pragma: allowlist secret
       - POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256
     labels:
       - "harbor.exclude=true"
@@ -135,7 +135,7 @@ services:
     networks:
       - harbor-dev-network
     profiles:
-      - postgres  # Enable with: docker-compose --profile postgres up
+      - postgres # Enable with: docker-compose --profile postgres up
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U harbor_dev"]
       interval: 10s
@@ -164,7 +164,7 @@ services:
     networks:
       - harbor-dev-network
     profiles:
-      - registry  # Enable with: docker-compose --profile registry up
+      - registry # Enable with: docker-compose --profile registry up
 
   # =============================================================================
   # Prometheus (for metrics development)
@@ -179,12 +179,12 @@ services:
       - ../../config/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_dev_data:/prometheus
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=7d'
-      - '--web.enable-lifecycle'
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-lifecycle"
     labels:
       - "harbor.exclude=true"
       - "com.harbor.environment=development"
@@ -192,7 +192,7 @@ services:
     networks:
       - harbor-dev-network
     profiles:
-      - monitoring  # Enable with: docker-compose --profile monitoring up
+      - monitoring # Enable with: docker-compose --profile monitoring up
 
   # =============================================================================
   # Grafana (for metrics visualization)
@@ -207,7 +207,7 @@ services:
       - grafana_dev_data:/var/lib/grafana
       - ../../config/monitoring/grafana:/etc/grafana/provisioning
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=dev_password_123  # pragma: allowlist secret
+      - GF_SECURITY_ADMIN_PASSWORD=dev_password_123 # pragma: allowlist secret
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_INSTALL_PLUGINS=grafana-clock-panel
     labels:
@@ -219,7 +219,7 @@ services:
     depends_on:
       - prometheus-dev
     profiles:
-      - monitoring  # Enable with: docker-compose --profile monitoring up
+      - monitoring # Enable with: docker-compose --profile monitoring up
 
   # =============================================================================
   # MailHog (for email testing in development)
@@ -229,8 +229,8 @@ services:
     container_name: harbor-mailhog-dev
     restart: unless-stopped
     ports:
-      - "1025:1025"  # SMTP server
-      - "8025:8025"  # Web interface
+      - "1025:1025" # SMTP server
+      - "8025:8025" # Web interface
     labels:
       - "harbor.exclude=true"
       - "com.harbor.environment=development"
@@ -238,7 +238,7 @@ services:
     networks:
       - harbor-dev-network
     profiles:
-      - mail  # Enable with: docker-compose --profile mail up
+      - mail # Enable with: docker-compose --profile mail up
 
   # =============================================================================
   # Test Containers (for testing Harbor functionality)
@@ -254,7 +254,7 @@ services:
     labels:
       - "harbor.enable=true"
       - "harbor.policy.auto-update=true"
-      - "harbor.policy.check-interval=60"  # 1 minute for testing
+      - "harbor.policy.check-interval=60" # 1 minute for testing
       - "com.harbor.test-container=true"
     networks:
       - harbor-dev-network
@@ -269,7 +269,7 @@ services:
       - "6380:6379"
     labels:
       - "harbor.enable=true"
-      - "harbor.policy.auto-update=false"  # Test excluded container
+      - "harbor.policy.auto-update=false" # Test excluded container
       - "com.harbor.test-container=true"
     networks:
       - harbor-dev-network

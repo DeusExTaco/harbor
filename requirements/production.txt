@@ -1,13 +1,43 @@
-# Harbor Container Updater - Production Dependencies
-# Additional dependencies for enterprise/production deployments
+# Harbor Container Updater - Production Dependencies (Simplified)
+# Additional dependencies for production deployments
 
+# Include base requirements
 -r base.txt
 
-# Production database drivers
-psycopg2-binary>=2.9.0
+# =============================================================================
+# Production Database Driver
+# =============================================================================
+psycopg2-binary>=2.9.0,<3.0.0
 
-# Caching and sessions
-redis>=5.0.0
+# =============================================================================
+# Production Performance
+# =============================================================================
+orjson>=3.9.0,<4.0.0
 
-# Production WSGI server
-gunicorn>=21.2.0
+# =============================================================================
+# Production Caching (Future)
+# =============================================================================
+# redis>=5.0.0,<6.0.0  # Enable when implementing M8+ caching features
+
+# =============================================================================
+# Production Server (Future)
+# =============================================================================
+# gunicorn>=21.2.0,<22.0.0  # Enable when deploying with gunicorn
+
+# =============================================================================
+# Production Email Support (Future - M7+)
+# =============================================================================
+# aiosmtplib>=3.0.0,<4.0.0  # Enable when implementing M7+ email notifications
+# email-validator>=2.1.0,<3.0.0  # Enable when implementing M7+ email validation
+
+# =============================================================================
+# Production Monitoring (Future - M7+)
+# =============================================================================
+# opentelemetry-api>=1.21.0,<2.0.0  # Enable when implementing M7+ tracing
+# sentry-sdk>=1.40.0,<2.0.0  # Enable when implementing M7+ error tracking
+
+# =============================================================================
+# Production Security (Future - M7+)
+# =============================================================================
+# pyotp>=2.9.0,<3.0.0  # Enable when implementing M7+ TOTP for MFA
+# python-ldap>=3.4.0,<4.0.0  # Enable when implementing M9+ LDAP auth

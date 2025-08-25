@@ -1,42 +1,59 @@
-# Harbor Container Updater - Base Dependencies
-# Core runtime dependencies for Harbor v1.0
-# ARM v7 compatible versions
+# Harbor Container Updater - Base Dependencies (Simplified)
+# Core runtime dependencies for Harbor v1.0 (M0-M6 milestones)
 
-# Web framework and async support
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
-python-multipart>=0.0.6
+# =============================================================================
+# Web Framework and Async Support
+# =============================================================================
+fastapi>=0.104.0,<0.120.0
+uvicorn[standard]>=0.24.0,<0.30.0
+python-multipart>=0.0.6,<0.1.0
 
+# =============================================================================
+# Configuration and Validation
+# =============================================================================
+pydantic>=2.5.0,<3.0.0
+pydantic-settings>=2.1.0,<3.0.0
+
+# =============================================================================
 # Database and ORM
-sqlalchemy>=2.0.0
-alembic>=1.12.0
-aiosqlite>=0.19.0
+# =============================================================================
+sqlalchemy>=2.0.0,<2.1.0
+alembic>=1.12.0,<2.0.0
+aiosqlite>=0.19.0,<0.21.0
 
-# Configuration and validation
-pydantic>=2.5.0
-pydantic-settings>=2.1.0
+# =============================================================================
+# Template Engine
+# =============================================================================
+jinja2>=3.1.0,<4.0.0
 
-# Template engine
-jinja2>=3.1.0
+# =============================================================================
+# HTTP Client and Docker
+# =============================================================================
+httpx>=0.25.0,<0.28.0
+docker>=6.1.0,<8.0.0
 
-# HTTP client for registry API calls
-httpx>=0.25.0
+# =============================================================================
+# Scheduling and Logging
+# =============================================================================
+apscheduler>=3.10.0,<4.0.0
+structlog>=23.2.0,<24.0.0
+prometheus-client>=0.19.0,<1.0.0
 
-# Docker integration
-docker>=6.1.0
+# =============================================================================
+# Security
+# =============================================================================
+argon2-cffi>=23.1.0,<24.0.0
+cryptography>=43.0.0,<44.0.0  # Updated to fix OpenSSL vulnerability
 
-# Job scheduling
-apscheduler>=3.10.0
-
-# Logging and monitoring
-structlog>=23.2.0
-prometheus-client>=0.19.0
-
-# Security - ARM v7 compatible versions
-argon2-cffi>=23.1.0
-# Use cryptography with fallback for ARM compilation
-cryptography>=41.0.0
-
+# =============================================================================
 # Utilities
-python-dateutil>=2.8.0
-packaging>=23.0
+# =============================================================================
+python-dateutil>=2.8.0,<3.0.0
+packaging>=23.0,<25.0
+
+# =============================================================================
+# Optional Dependencies (graceful fallback if missing)
+# =============================================================================
+psutil>=5.9.0,<6.0.0
+pyyaml>=6.0,<7.0
+tzdata>=2023.3

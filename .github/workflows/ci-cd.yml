@@ -10,7 +10,7 @@ on:
 # Comprehensive permissions for all workflow operations
 permissions:
   actions: read
-  contents: read
+  contents: write  # Enhanced: needed for release creation
   security-events: write
   pull-requests: write
   issues: write
@@ -18,8 +18,10 @@ permissions:
 
 env:
   # Global environment variables
-  HARBOR_VERSION: "0.1.0"
+  HARBOR_VERSION: "0.1.0-alpha.2"
   HARBOR_MILESTONE: "M0"
+  REGISTRY_IMAGE_DOCKERHUB: dextaco/harbor
+  REGISTRY_IMAGE_GHCR: ghcr.io/deusextaco/harbor
 
 jobs:
   # =============================================================================
@@ -30,7 +32,7 @@ jobs:
   code-quality:
     name: Code Quality & Linting
     uses: ./.github/workflows/test.yml
-    secrets: inherit  # pragma: allowlist secret
+    secrets: inherit # pragma: allowlist secret
     with:
       stage: "quality"
 
@@ -38,13 +40,13 @@ jobs:
   static-security:
     name: Static Security Analysis
     uses: ./.github/workflows/codeql.yml
-    secrets: inherit  # pragma: allowlist secret
+    secrets: inherit # pragma: allowlist secret
 
   # Dependency scanning (runs in parallel)
   dependency-security:
     name: Dependency Security
     uses: ./.github/workflows/dependency-review.yml
-    secrets: inherit  # pragma: allowlist secret
+    secrets: inherit # pragma: allowlist secret
 
   # =============================================================================
   # Stage 2: Comprehensive Test Suite (After Quality Gate)
@@ -54,60 +56,326 @@ jobs:
     name: Full Test Suite
     needs: [code-quality]  # Wait for linting to pass
     uses: ./.github/workflows/test.yml
-    secrets: inherit  # pragma: allowlist secret
+    secrets: inherit # pragma: allowlist secret
     with:
       stage: "full-tests"
 
   # =============================================================================
-  # Stage 3: Build & Publish (After Tests Pass)
+  # Stage 3: Build Configuration (Determine build strategy)
   # =============================================================================
 
-  docker-build:
-    name: Docker Build & Publish
-    needs: [test-suite, static-security, dependency-security]  # All checks must pass
+  build-config:
+    name: Build Configuration
+    runs-on: ubuntu-latest
+    needs: [test-suite, static-security, dependency-security]
     if: |
       always() &&
       needs.test-suite.outputs.tests-passed == 'true' &&
       (needs.static-security.result == 'success' || needs.static-security.result == 'skipped') &&
-      (needs.dependency-security.result == 'success' || needs.dependency-security.result == 'skipped') &&
-      github.event_name != 'pull_request'
-    uses: ./.github/workflows/docker-build.yml
-    secrets: inherit  # pragma: allowlist secret
+      (needs.dependency-security.result == 'success' || needs.dependency-security.result == 'skipped')
+
+    outputs:
+      should-build: ${{ steps.config.outputs.should-build }}
+      is-release: ${{ steps.config.outputs.is-release }}
+      docker-tags: ${{ steps.config.outputs.docker-tags }}
+      ghcr-tags: ${{ steps.config.outputs.ghcr-tags }}
+      version: ${{ steps.config.outputs.version }}
+      milestone: ${{ steps.config.outputs.milestone }}
+      is-prerelease: ${{ steps.config.outputs.is-prerelease }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure build strategy
+        id: config
+        run: |
+          # Determine if this is a release (tag push)
+          if [[ "${{ github.ref_type }}" == "tag" && "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "is-release=true" >> $GITHUB_OUTPUT
+            echo "should-build=true" >> $GITHUB_OUTPUT
+
+            # Extract version from tag
+            VERSION="${{ github.ref_name }}"  # e.g., v0.1.0-alpha.2
+            VERSION_CLEAN="${VERSION#v}"      # Remove 'v' prefix
+            echo "version=$VERSION_CLEAN" >> $GITHUB_OUTPUT
+
+            # Determine milestone from version
+            case "$VERSION_CLEAN" in
+              0.1.*) MILESTONE="M0" ;;
+              0.2.*) MILESTONE="M1" ;;
+              0.3.*) MILESTONE="M2" ;;
+              0.4.*) MILESTONE="M3" ;;
+              0.5.*) MILESTONE="M4" ;;
+              0.6.*) MILESTONE="M5" ;;
+              1.0.*) MILESTONE="M6" ;;
+              *) MILESTONE="M0" ;;
+            esac
+            echo "milestone=$MILESTONE" >> $GITHUB_OUTPUT
+
+            # Check if prerelease
+            if [[ "$VERSION_CLEAN" =~ (alpha|beta|rc|dev) ]]; then
+              echo "is-prerelease=true" >> $GITHUB_OUTPUT
+            else
+              echo "is-prerelease=false" >> $GITHUB_OUTPUT
+            fi
+
+            # Set release tags
+            echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:$VERSION_CLEAN,${{ env.REGISTRY_IMAGE_DOCKERHUB }}:latest" >> $GITHUB_OUTPUT
+            echo "ghcr-tags=${{ env.REGISTRY_IMAGE_GHCR }}:$VERSION_CLEAN,${{ env.REGISTRY_IMAGE_GHCR }}:latest" >> $GITHUB_OUTPUT
+
+            echo "🏷️ RELEASE BUILD for $VERSION (milestone: $MILESTONE)"
+
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "is-release=false" >> $GITHUB_OUTPUT
+            echo "should-build=true" >> $GITHUB_OUTPUT
+            echo "version=${{ env.HARBOR_VERSION }}" >> $GITHUB_OUTPUT
+            echo "milestone=${{ env.HARBOR_MILESTONE }}" >> $GITHUB_OUTPUT
+            echo "is-prerelease=false" >> $GITHUB_OUTPUT
+
+            # Set development tags
+            echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:latest,${{ env.REGISTRY_IMAGE_DOCKERHUB }}:main" >> $GITHUB_OUTPUT
+            echo "ghcr-tags=${{ env.REGISTRY_IMAGE_GHCR }}:latest,${{ env.REGISTRY_IMAGE_GHCR }}:main" >> $GITHUB_OUTPUT
+
+            echo "📦 MAIN BRANCH BUILD"
+
+          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            echo "is-release=false" >> $GITHUB_OUTPUT
+            echo "should-build=true" >> $GITHUB_OUTPUT
+            echo "version=${{ env.HARBOR_VERSION }}-dev" >> $GITHUB_OUTPUT
+            echo "milestone=${{ env.HARBOR_MILESTONE }}" >> $GITHUB_OUTPUT
+            echo "is-prerelease=true" >> $GITHUB_OUTPUT
+
+            # Set develop tags
+            echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:develop" >> $GITHUB_OUTPUT
+            echo "ghcr-tags=${{ env.REGISTRY_IMAGE_GHCR }}:develop" >> $GITHUB_OUTPUT
+
+            echo "🔧 DEVELOP BRANCH BUILD"
+
+          else
+            echo "is-release=false" >> $GITHUB_OUTPUT
+            echo "should-build=false" >> $GITHUB_OUTPUT
+            echo "version=${{ env.HARBOR_VERSION }}" >> $GITHUB_OUTPUT
+            echo "milestone=${{ env.HARBOR_MILESTONE }}" >> $GITHUB_OUTPUT
+            echo "is-prerelease=false" >> $GITHUB_OUTPUT
+
+            echo "📝 PULL REQUEST - Build skipped"
+          fi
 
   # =============================================================================
-  # Stage 4: Security Scanning (After Images Are Built)
+  # Stage 4: Docker Build & Publish (Enhanced for releases)
+  # =============================================================================
+
+  docker-build:
+    name: Docker Build & Publish
+    needs: [build-config]
+    if: needs.build-config.outputs.should-build == 'true'
+    runs-on: ubuntu-latest
+
+    outputs:
+      build-successful: ${{ steps.build-result.outputs.success }}
+      image-tags: ${{ steps.build-result.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: env.REGISTRY_IMAGE_DOCKERHUB != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.REGISTRY_IMAGE_DOCKERHUB }}
+            ${{ env.REGISTRY_IMAGE_GHCR }}
+          labels: |
+            org.opencontainers.image.title=Harbor Container Updater
+            org.opencontainers.image.description=Automated Docker container updates for home labs and enterprises
+            org.opencontainers.image.source=https://github.com/DeusExTaco/harbor
+            org.opencontainers.image.documentation=https://harbor-docs.dev
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.vendor=Harbor Team
+            org.opencontainers.image.version=${{ needs.build-config.outputs.version }}
+            harbor.milestone=${{ needs.build-config.outputs.milestone }}
+            harbor.deployment-profile=homelab
+            harbor.is-release=${{ needs.build-config.outputs.is-release }}
+
+      - name: Build and push Docker images
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ needs.build-config.outputs.docker-tags }}
+            ${{ needs.build-config.outputs.ghcr-tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      - name: Set build result
+        id: build-result
+        run: |
+          echo "success=true" >> $GITHUB_OUTPUT
+          echo "tags=${{ needs.build-config.outputs.docker-tags }},${{ needs.build-config.outputs.ghcr-tags }}" >> $GITHUB_OUTPUT
+          echo "🐳 Build completed successfully!"
+
+  # =============================================================================
+  # Stage 5: Container Security Scanning
   # =============================================================================
 
   container-security:
     name: Container Security Scan
-    needs: [docker-build]  # Wait for images to be published
+    needs: [build-config, docker-build]
     if: |
       always() &&
-      needs.docker-build.outputs.build-successful == 'true' &&
-      github.event_name != 'pull_request'
+      needs.docker-build.outputs.build-successful == 'true'
     uses: ./.github/workflows/security.yml
-    secrets: inherit  # pragma: allowlist secret
+    secrets: inherit # pragma: allowlist secret
     with:
       scan-type: "container"
       image-tags: ${{ needs.docker-build.outputs.image-tags }}
 
   # =============================================================================
-  # Stage 5: Final Status & Summary
+  # Stage 6: GitHub Release Creation (Only for tags)
+  # =============================================================================
+
+  create-github-release:
+    name: Create GitHub Release
+    needs: [build-config, docker-build, container-security]
+    if: |
+      always() &&
+      needs.build-config.outputs.is-release == 'true' &&
+      needs.docker-build.outputs.build-successful == 'true' &&
+      (needs.container-security.result == 'success' || needs.container-security.result == 'skipped')
+    runs-on: ubuntu-latest
+
+    outputs:
+      release-url: ${{ steps.create-release.outputs.html_url }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for changelog
+
+      - name: Generate release notes
+        id: release-notes
+        run: |
+          VERSION="${{ needs.build-config.outputs.version }}"
+          MILESTONE="${{ needs.build-config.outputs.milestone }}"
+
+          # Get previous tag for changelog
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          # Create release notes
+          cat > release-notes.md << EOF
+          Harbor Container Updater $VERSION - $MILESTONE Milestone
+
+          🎯 **$MILESTONE Phase**: $([ "$MILESTONE" = "M0" ] && echo "Foundation Complete" || echo "Development Phase")
+
+          ## 🚀 Quick Start
+          \`\`\`bash
+          docker run -d --name harbor --restart unless-stopped \\
+            -p 8080:8080 \\
+            -v /var/run/docker.sock:/var/run/docker.sock:ro \\
+            ghcr.io/deusextaco/harbor:$VERSION
+          \`\`\`
+
+          Dashboard: http://localhost:8080
+
+          ## 📦 Available Images
+          - \`ghcr.io/deusextaco/harbor:$VERSION\`
+          - \`dextaco/harbor:$VERSION\`
+
+          ## 🏗️ M0 Foundation Features
+          - ✅ FastAPI-based web framework with automatic OpenAPI documentation
+          - ✅ Zero-configuration deployment for home labs
+          - ✅ SQLite database with automatic migrations
+          - ✅ Profile-based configuration (homelab, development, production)
+          - ✅ Comprehensive health checks and monitoring endpoints
+          - ✅ Complete CI/CD pipeline with multi-stage testing
+          - ✅ Security scanning and vulnerability detection
+          - ✅ Development environment with hot reload
+          - ✅ Release automation with semantic versioning
+
+          ## 🛣️ What's Next
+
+          **M1 Milestone (Container Discovery & Registry Integration)**
+          - Automatic container discovery with change detection
+          - Multi-registry support (Docker Hub, GHCR, private registries)
+          - Intelligent caching and rate limiting
+          - Container specification analysis and tracking
+
+          See full changelog and technical details at: https://github.com/DeusExTaco/harbor/releases/tag/v$VERSION
+          EOF
+
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          cat release-notes.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        id: create-release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ needs.build-config.outputs.version }}
+          release_name: Harbor ${{ needs.build-config.outputs.version }} - ${{ needs.build-config.outputs.milestone }} Milestone
+          body: ${{ steps.release-notes.outputs.notes }}
+          draft: false
+          prerelease: ${{ needs.build-config.outputs.is-prerelease }}
+
+      - name: Upload Docker Compose example
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: examples/home-lab/basic/docker-compose.yml
+          asset_name: docker-compose-homelab.yml
+          asset_content_type: application/x-yaml
+
+  # =============================================================================
+  # Stage 7: Final Status & Summary
   # =============================================================================
 
   pipeline-summary:
     name: Pipeline Summary
     runs-on: ubuntu-latest
-    needs: [code-quality, static-security, dependency-security, test-suite, docker-build, container-security]
+    needs: [code-quality, static-security, dependency-security, test-suite, build-config, docker-build, container-security, create-github-release]
     if: always()
 
     steps:
-      - name: Generate pipeline summary
+      - name: Generate enhanced pipeline summary
         run: |
           echo "# 🚀 Harbor CI/CD Pipeline Summary" > pipeline-summary.md
           echo "Generated on: $(date -u)" >> pipeline-summary.md
           echo "Pipeline ID: ${{ github.run_id }}" >> pipeline-summary.md
           echo "Commit: ${{ github.sha }}" >> pipeline-summary.md
+          echo "Event: ${{ github.event_name }}" >> pipeline-summary.md
+          echo "Ref: ${{ github.ref }}" >> pipeline-summary.md
           echo "" >> pipeline-summary.md
 
           echo "## 📊 Pipeline Results" >> pipeline-summary.md
@@ -117,35 +385,56 @@ jobs:
           echo "| 🔒 Static Security | ${{ needs.static-security.result }} | - |" >> pipeline-summary.md
           echo "| 📦 Dependency Security | ${{ needs.dependency-security.result }} | - |" >> pipeline-summary.md
           echo "| 🧪 Test Suite | ${{ needs.test-suite.result }} | - |" >> pipeline-summary.md
+          echo "| 🏗️ Build Config | ${{ needs.build-config.result }} | - |" >> pipeline-summary.md
           echo "| 🐳 Docker Build | ${{ needs.docker-build.result }} | - |" >> pipeline-summary.md
           echo "| 🛡️ Container Security | ${{ needs.container-security.result }} | - |" >> pipeline-summary.md
+          echo "| 🚀 GitHub Release | ${{ needs.create-github-release.result }} | - |" >> pipeline-summary.md
           echo "" >> pipeline-summary.md
 
-          # Determine overall pipeline status
+          # Enhanced status determination
           if [[ "${{ needs.code-quality.result }}" == "success" && \
                 "${{ needs.test-suite.result }}" == "success" ]]; then
-            echo "## ✅ Pipeline Status: SUCCESS" >> pipeline-summary.md
-            echo "" >> pipeline-summary.md
-            echo "### 🎉 All critical checks passed!" >> pipeline-summary.md
 
-            if [ "${{ github.event_name }}" != "pull_request" ]; then
-              if [[ "${{ needs.docker-build.result }}" == "success" ]]; then
+            if [[ "${{ needs.build-config.outputs.is-release }}" == "true" ]]; then
+              if [[ "${{ needs.docker-build.result }}" == "success" && \
+                    "${{ needs.create-github-release.result }}" == "success" ]]; then
+                echo "## 🎉 RELEASE SUCCESSFUL!" >> pipeline-summary.md
+                echo "" >> pipeline-summary.md
+                echo "### 🚀 Harbor ${{ needs.build-config.outputs.version }} Released!" >> pipeline-summary.md
+                echo "- ✅ All tests passed" >> pipeline-summary.md
                 echo "- ✅ Docker images built and published" >> pipeline-summary.md
-                echo "- ✅ Single architecture support (amd64)" >> pipeline-summary.md
-                echo "- ✅ Available on Docker Hub and GHCR" >> pipeline-summary.md
-
-                if [[ "${{ needs.container-security.result }}" == "success" ]]; then
-                  echo "- ✅ Container security scans completed" >> pipeline-summary.md
+                echo "- ✅ Security scans completed" >> pipeline-summary.md
+                echo "- ✅ GitHub release created" >> pipeline-summary.md
+                echo "" >> pipeline-summary.md
+                echo "### 📦 Published Images:" >> pipeline-summary.md
+                echo "- \`ghcr.io/deusextaco/harbor:${{ needs.build-config.outputs.version }}\`" >> pipeline-summary.md
+                echo "- \`dextaco/harbor:${{ needs.build-config.outputs.version }}\`" >> pipeline-summary.md
+                echo "" >> pipeline-summary.md
+                echo "### 🎯 Release Details:" >> pipeline-summary.md
+                echo "- **Version**: ${{ needs.build-config.outputs.version }}" >> pipeline-summary.md
+                echo "- **Milestone**: ${{ needs.build-config.outputs.milestone }}" >> pipeline-summary.md
+                echo "- **Type**: ${{ needs.build-config.outputs.is-prerelease == 'true' && 'Pre-release' || 'Stable' }}" >> pipeline-summary.md
+                if [[ "${{ needs.create-github-release.outputs.release-url }}" != "" ]]; then
+                  echo "- **Release Notes**: ${{ needs.create-github-release.outputs.release-url }}" >> pipeline-summary.md
                 fi
+              else
+                echo "## ⚠️ RELEASE FAILED!" >> pipeline-summary.md
+                echo "" >> pipeline-summary.md
+                echo "Release creation failed - check the logs above." >> pipeline-summary.md
               fi
             else
-              echo "- ℹ️  Pull request - Docker build skipped" >> pipeline-summary.md
+              echo "## ✅ BUILD SUCCESSFUL!" >> pipeline-summary.md
+              echo "" >> pipeline-summary.md
+              echo "### 🎉 All checks passed!" >> pipeline-summary.md
+              if [[ "${{ needs.docker-build.result }}" == "success" ]]; then
+                echo "- ✅ Docker images built and published" >> pipeline-summary.md
+                echo "- ✅ Available for testing and deployment" >> pipeline-summary.md
+              fi
             fi
           else
-            echo "## ❌ Pipeline Status: FAILED" >> pipeline-summary.md
+            echo "## ❌ PIPELINE FAILED!" >> pipeline-summary.md
             echo "" >> pipeline-summary.md
             echo "### 🚨 Critical issues found!" >> pipeline-summary.md
-
             if [[ "${{ needs.code-quality.result }}" != "success" ]]; then
               echo "- ❌ Code quality checks failed" >> pipeline-summary.md
             fi
@@ -157,24 +446,34 @@ jobs:
           echo "" >> pipeline-summary.md
           echo "## 📋 Next Steps" >> pipeline-summary.md
 
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "- Review any failed checks above" >> pipeline-summary.md
-            echo "- Fix issues and push new commits" >> pipeline-summary.md
-            echo "- Merge when all checks pass" >> pipeline-summary.md
+          if [[ "${{ needs.build-config.outputs.is-release }}" == "true" ]]; then
+            if [[ "${{ needs.docker-build.result }}" == "success" && \
+                  "${{ needs.create-github-release.result }}" == "success" ]]; then
+              echo "- 🎉 Release is complete and ready for use!" >> pipeline-summary.md
+              echo "- 📢 Announce the release to the community" >> pipeline-summary.md
+              echo "- 📝 Update documentation if needed" >> pipeline-summary.md
+            else
+              echo "- 🔧 Fix release issues and re-tag if necessary" >> pipeline-summary.md
+              echo "- 📝 Check workflow logs for specific errors" >> pipeline-summary.md
+            fi
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "- 📝 Review any failed checks above" >> pipeline-summary.md
+            echo "- 🔧 Fix issues and push new commits" >> pipeline-summary.md
+            echo "- ✅ Merge when all checks pass" >> pipeline-summary.md
           elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
             if [[ "${{ needs.docker-build.result }}" == "success" ]]; then
               echo "- ✅ New images are available for deployment" >> pipeline-summary.md
               echo "- 🔍 Review security scan results if needed" >> pipeline-summary.md
-              echo "- 📦 Update any deployment configs with new image tags" >> pipeline-summary.md
+              echo "- 📦 Update deployment configs with new image tags" >> pipeline-summary.md
             else
-              echo "- ❌ Fix build issues before deployment" >> pipeline-summary.md
+              echo "- 🔧 Fix build issues before deployment" >> pipeline-summary.md
             fi
           fi
 
           echo "" >> pipeline-summary.md
-          echo "## 🏗️ Harbor Development Status" >> pipeline-summary.md
-          echo "- **Version**: ${{ env.HARBOR_VERSION }}" >> pipeline-summary.md
-          echo "- **Milestone**: ${{ env.HARBOR_MILESTONE }} (Foundation Phase)" >> pipeline-summary.md
+          echo "## 🗂️ Harbor Development Status" >> pipeline-summary.md
+          echo "- **Version**: ${{ needs.build-config.outputs.version }}" >> pipeline-summary.md
+          echo "- **Milestone**: ${{ needs.build-config.outputs.milestone }} (Foundation Phase)" >> pipeline-summary.md
           echo "- **Current Focus**: Building core infrastructure and CI/CD pipeline" >> pipeline-summary.md
           echo "- **Next Milestone**: M1 (Container Discovery & Registry Integration)" >> pipeline-summary.md
 
@@ -191,102 +490,28 @@ jobs:
         run: |
           if [[ "${{ needs.code-quality.result }}" == "success" && \
                 "${{ needs.test-suite.result }}" == "success" ]]; then
-            echo "✅ Harbor CI/CD Pipeline completed successfully!"
-            echo ""
-            echo "📊 Summary:"
-            echo "- Code Quality: ✅ PASSED"
-            echo "- Test Suite: ✅ PASSED"
-            echo "- Static Security: ${{ needs.static-security.result }}"
-            echo "- Docker Build: ${{ needs.docker-build.result }}"
-            echo "- Container Security: ${{ needs.container-security.result }}"
-            echo ""
-            if [ "${{ needs.docker-build.result }}" == "success" ]; then
-              echo "🐳 New Docker images published:"
-              echo "- dextaco/harbor:latest"
-              echo "- ghcr.io/deusextaco/harbor:latest"
+
+            if [[ "${{ needs.build-config.outputs.is-release }}" == "true" ]]; then
+              if [[ "${{ needs.docker-build.result }}" == "success" && \
+                    "${{ needs.create-github-release.result }}" == "success" ]]; then
+                echo "🎉 Harbor ${{ needs.build-config.outputs.version }} released successfully!"
+                echo ""
+                echo "📦 Docker Images:"
+                echo "- ghcr.io/deusextaco/harbor:${{ needs.build-config.outputs.version }}"
+                echo "- dextaco/harbor:${{ needs.build-config.outputs.version }}"
+                echo ""
+                echo "🔗 Release URL: ${{ needs.create-github-release.outputs.release-url }}"
+              else
+                echo "❌ Release creation failed!"
+                exit 1
+              fi
+            else
+              echo "✅ Harbor CI/CD Pipeline completed successfully!"
+              if [ "${{ needs.docker-build.result }}" == "success" ]; then
+                echo "🐳 New Docker images published"
+              fi
             fi
           else
             echo "❌ Harbor CI/CD Pipeline failed!"
-            echo ""
-            echo "🚨 Failed stages:"
-            if [[ "${{ needs.code-quality.result }}" != "success" ]]; then
-              echo "- Code Quality: ${{ needs.code-quality.result }}"
-            fi
-            if [[ "${{ needs.test-suite.result }}" != "success" ]]; then
-              echo "- Test Suite: ${{ needs.test-suite.result }}"
-            fi
-            echo ""
-            echo "Please review the failed stages and fix the issues."
             exit 1
           fi
-
-  # =============================================================================
-  # PR Specific Actions (Only for Pull Requests)
-  # =============================================================================
-
-  pr-feedback:
-    name: PR Feedback
-    runs-on: ubuntu-latest
-    needs: [code-quality, static-security, dependency-security, test-suite]
-    if: |
-      always() &&
-      github.event_name == 'pull_request'
-
-    steps:
-      - name: Generate PR comment
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const codeQuality = '${{ needs.code-quality.result }}';
-            const staticSecurity = '${{ needs.static-security.result }}';
-            const dependencySecurity = '${{ needs.dependency-security.result }}';
-            const testSuite = '${{ needs.test-suite.result }}';
-
-            let comment = '## 🤖 Harbor CI/CD Results\n\n';
-            comment += '| Check | Status |\n';
-            comment += '|-------|--------|\n';
-            comment += `| 🔍 Code Quality | ${codeQuality === 'success' ? '✅ Passed' : '❌ Failed'} |\n`;
-            comment += `| 🔒 Static Security | ${staticSecurity === 'success' ? '✅ Passed' : staticSecurity === 'skipped' ? '⭐️ Skipped' : '❌ Failed'} |\n`;
-            comment += `| 📦 Dependency Security | ${dependencySecurity === 'success' ? '✅ Passed' : dependencySecurity === 'skipped' ? '⭐️ Skipped' : '❌ Failed'} |\n`;
-            comment += `| 🧪 Test Suite | ${testSuite === 'success' ? '✅ Passed' : '❌ Failed'} |\n\n`;
-
-            if (codeQuality === 'success' && testSuite === 'success') {
-              comment += '✅ **All critical checks passed!** This PR is ready for review.\n\n';
-              comment += '> 📦 Docker images will be built and published when merged to main.\n';
-            } else {
-              comment += '❌ **Some checks failed.** Please review and fix the issues above.\n\n';
-              comment += '> 🔧 Push new commits to re-run the checks automatically.\n';
-            }
-
-            comment += '\n---\n';
-            comment += `<sub>🤖 Automated comment from Harbor CI/CD Pipeline | Run ID: ${{ github.run_id }}</sub>`;
-
-            // Find existing comment
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            const botComment = comments.find(comment =>
-              comment.user.type === 'Bot' &&
-              comment.body.includes('Harbor CI/CD Results')
-            );
-
-            if (botComment) {
-              // Update existing comment
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botComment.id,
-                body: comment
-              });
-            } else {
-              // Create new comment
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: comment
-              });
-            }

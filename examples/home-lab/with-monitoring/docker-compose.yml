@@ -1,6 +1,6 @@
 # Home Lab with Monitoring Example
 # Harbor with Prometheus and Grafana
-version: '3.8'
+version: "3.8"
 
 services:
   harbor:
