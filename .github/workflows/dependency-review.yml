@@ -8,8 +8,15 @@ on:
         value: ${{ jobs.dependency-summary.outputs.dependency-passed }}
   pull_request:
     branches: [ "main", "develop" ]
+    paths:
+      - 'requirements/**'
+      - 'pyproject.toml'
+      - '.github/workflows/dependency-review.yml'
   push:
     branches: [ "main", "develop" ]
+    paths:
+      - 'requirements/**'
+      - 'pyproject.toml'
   schedule:
     # Run dependency review weekly on Sundays at 2 AM UTC
     - cron: '0 2 * * 0'
@@ -17,19 +24,16 @@ on:
 permissions:
   contents: read
   pull-requests: write
-  security-events: write  # pragma: allowlist secret
+  security-events: write
 
 jobs:
   # =============================================================================
-  # Dependency Review (PR only)
+  # GitHub Dependency Review (PR only)
   # =============================================================================
-  dependency-review:
-    name: Dependency Review
+  github-dependency-review:
+    name: GitHub Dependency Review
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
-
-    outputs:
-      review-passed: ${{ steps.review-result.outputs.passed }}
 
     steps:
       - name: Checkout Repository
@@ -38,25 +42,37 @@ jobs:
       - name: Dependency Review
         uses: actions/dependency-review-action@v4
         with:
-          fail-on-severity: moderate
-          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, GPL-3.0
-          comment-summary-in-pr: always
+          # Allow moderate vulnerabilities during M0 development
+          fail-on-severity: high
 
-      - name: Set review result
-        id: review-result
-        run: |
-          echo "passed=true" >> $GITHUB_OUTPUT
-          echo "✅ Dependency review completed"
+          # Allow common open source licenses + Python ecosystem licenses
+          allow-licenses: >-
+            MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC,
+            GPL-3.0, PSF-2.0, Apache, BSD, Python-2.0, 0BSD
+
+          # Don't fail on unknown licenses (common with Python packages)
+          deny-licenses: GPL-2.0, AGPL-3.0, LGPL-2.1
+
+          # Comment summary in PR
+          comment-summary-in-pr: on-failure
+
+          # Only check runtime dependencies for now
+          fail-on-scopes: runtime
+
+          # Base and head refs for comparison
+          base-ref: ${{ github.event.pull_request.base.sha }}
+          head-ref: ${{ github.event.pull_request.head.sha }}
 
   # =============================================================================
-  # Dependency Security Scan (All events)
+  # Security Vulnerability Scan
   # =============================================================================
-  dependency-scan:
-    name: Dependency Security Scan
+  security-scan:
+    name: Security Vulnerability Scan
     runs-on: ubuntu-latest
 
     outputs:
       scan-passed: ${{ steps.scan-result.outputs.passed }}
+      vulnerability-count: ${{ steps.count-vulns.outputs.count }}
 
     steps:
       - name: Checkout Repository
@@ -68,124 +84,163 @@ jobs:
           python-version: '3.13'
           cache: 'pip'
 
-      - name: Install dependencies
+      - name: Install security scanning tools
         run: |
           python -m pip install --upgrade pip
-
-          # Install base dependencies if available
-          if [ -f "requirements/base.txt" ]; then
-            echo "📦 Installing base requirements..."
-            pip install -r requirements/base.txt || echo "⚠️  Some base dependencies failed"
-          fi
-
-          # Install development dependencies if available
-          if [ -f "requirements/development.txt" ]; then
-            echo "📦 Installing development requirements..."
-            pip install -r requirements/development.txt || echo "⚠️  Some dev dependencies failed"
-          fi
-
-          # Install from pyproject.toml if available
-          if [ -f "pyproject.toml" ]; then
-            echo "📦 Installing from pyproject.toml..."
-            pip install -e ".[dev]" || echo "⚠️  Project installation failed - expected during M0"
-          fi
-
-      - name: Install security tools
-        run: |
           pip install pip-audit safety
 
-      - name: Generate dependency report
+      - name: Install Harbor dependencies
         run: |
-          echo "🔍 Running dependency security scans..."
+          # Try to install dependencies, but don't fail if some packages have issues
+          echo "📦 Installing Harbor dependencies for security scan..."
 
-          # pip-audit scan
-          echo "Running pip-audit..."
-          pip-audit --format=json --output=dependency-audit.json || echo "⚠️  pip-audit found vulnerabilities"
-
-          # Generate package list
-          echo "Generating package list..."
-          pip list --format=json > installed-packages.json
-
-          # Safety check
-          echo "Running safety check..."
-          safety check --json --output=safety-report.json || echo "⚠️  Safety found vulnerabilities"
-        continue-on-error: true
-
-      - name: Analyze dependency results
-        run: |
-          echo "📊 Analyzing dependency scan results..."
-
-          # Check for critical vulnerabilities
-          CRITICAL_VULNS=0
-
-          if [ -f "dependency-audit.json" ]; then
-            # Count vulnerabilities from pip-audit
-            AUDIT_VULNS=$(python3 -c "
-            import json
-            try:
-                with open('dependency-audit.json', 'r') as f:
-                    data = json.load(f)
-                    vulns = len(data.get('vulnerabilities', []))
-                    print(vulns)
-            except:
-                print(0)
-            " 2>/dev/null || echo "0")
-
-            echo "pip-audit found $AUDIT_VULNS vulnerabilities"
-            CRITICAL_VULNS=$((CRITICAL_VULNS + AUDIT_VULNS))
+          if [ -f "requirements/base.txt" ]; then
+            echo "Installing base requirements..."
+            pip install -r requirements/base.txt || echo "⚠️ Some base dependencies failed"
           fi
 
+          # Don't install dev dependencies for security scan to keep it focused
+          echo "✅ Dependency installation completed (errors expected during M0)"
+
+      - name: Run pip-audit vulnerability scan
+        id: pip-audit
+        run: |
+          echo "🔍 Running pip-audit vulnerability scan..."
+
+          # Run pip-audit and capture output
+          pip-audit --format=json --output=pip-audit-report.json --progress-spinner=off || {
+            echo "pip-audit-failed=true" >> $GITHUB_ENV
+            echo "⚠️ pip-audit found vulnerabilities or encountered errors"
+          }
+
+          # Also generate human-readable report
+          pip-audit --format=columns --output=pip-audit-readable.txt --progress-spinner=off || echo "Readable report generation completed"
+
+      - name: Run Safety vulnerability scan
+        id: safety
+        run: |
+          echo "🛡️ Running Safety vulnerability scan..."
+
+          # Run safety scan
+          safety check --json --output=safety-report.json || {
+            echo "safety-failed=true" >> $GITHUB_ENV
+            echo "⚠️ Safety found vulnerabilities"
+          }
+
+      - name: Count and analyze vulnerabilities
+        id: count-vulns
+        run: |
+          echo "📊 Analyzing vulnerability scan results..."
+
+          TOTAL_VULNS=0
+          CRITICAL_VULNS=0
+          HIGH_VULNS=0
+          MODERATE_VULNS=0
+
+          # Parse pip-audit results
+          if [ -f "pip-audit-report.json" ]; then
+            AUDIT_VULNS=$(python3 -c "
+            import json, sys
+            try:
+                with open('pip-audit-report.json', 'r') as f:
+                    data = json.load(f)
+                    vulns = data.get('vulnerabilities', [])
+                    total = len(vulns)
+                    critical = sum(1 for v in vulns if v.get('fix_versions') and 'critical' in str(v).lower())
+                    high = sum(1 for v in vulns if v.get('fix_versions') and 'high' in str(v).lower())
+                    moderate = sum(1 for v in vulns if v.get('fix_versions') and 'moderate' in str(v).lower())
+                    print(f'{total},{critical},{high},{moderate}')
+            except Exception as e:
+                print('0,0,0,0')
+            " 2>/dev/null)
+
+            IFS=',' read -r audit_total audit_crit audit_high audit_mod <<< "$AUDIT_VULNS"
+            TOTAL_VULNS=$((TOTAL_VULNS + audit_total))
+            CRITICAL_VULNS=$((CRITICAL_VULNS + audit_crit))
+            HIGH_VULNS=$((HIGH_VULNS + audit_high))
+            MODERATE_VULNS=$((MODERATE_VULNS + audit_mod))
+
+            echo "pip-audit: $audit_total vulnerabilities ($audit_crit critical, $audit_high high, $audit_mod moderate)"
+          fi
+
+          # Parse Safety results
           if [ -f "safety-report.json" ]; then
-            # Count vulnerabilities from safety
             SAFETY_VULNS=$(python3 -c "
-            import json
+            import json, sys
             try:
                 with open('safety-report.json', 'r') as f:
                     data = json.load(f)
-                    vulns = len(data.get('vulnerabilities', []))
-                    print(vulns)
+                    vulns = data.get('vulnerabilities', [])
+                    total = len(vulns)
+                    print(total)
             except:
                 print(0)
-            " 2>/dev/null || echo "0")
+            " 2>/dev/null)
 
-            echo "Safety found $SAFETY_VULNS vulnerabilities"
-            CRITICAL_VULNS=$((CRITICAL_VULNS + SAFETY_VULNS))
+            TOTAL_VULNS=$((TOTAL_VULNS + SAFETY_VULNS))
+            echo "Safety: $SAFETY_VULNS vulnerabilities"
           fi
 
-          echo "Total vulnerabilities found: $CRITICAL_VULNS"
+          echo "📈 Vulnerability Summary:"
+          echo "- Total: $TOTAL_VULNS"
+          echo "- Critical: $CRITICAL_VULNS"
+          echo "- High: $HIGH_VULNS"
+          echo "- Moderate: $MODERATE_VULNS"
 
-          # For M0, we'll be lenient but informative
-          if [ $CRITICAL_VULNS -gt 10 ]; then
-            echo "⚠️  High number of vulnerabilities found ($CRITICAL_VULNS)"
-            echo "This may need attention before production deployment"
-          else
-            echo "✅ Acceptable vulnerability count for development phase"
-          fi
+          # Export for other jobs
+          echo "count=$TOTAL_VULNS" >> $GITHUB_OUTPUT
+          echo "critical=$CRITICAL_VULNS" >> $GITHUB_OUTPUT
+          echo "high=$HIGH_VULNS" >> $GITHUB_OUTPUT
+          echo "moderate=$MODERATE_VULNS" >> $GITHUB_OUTPUT
 
-      - name: Set scan result
+      - name: Evaluate security scan results
         id: scan-result
         run: |
-          # For M0 milestone, we pass dependency scans even with findings
-          # Real production deployments would be more strict
-          echo "passed=true" >> $GITHUB_OUTPUT
-          echo "✅ Dependency security scan completed"
+          TOTAL_VULNS="${{ steps.count-vulns.outputs.count }}"
+          CRITICAL_VULNS="${{ steps.count-vulns.outputs.critical }}"
+          HIGH_VULNS="${{ steps.count-vulns.outputs.high }}"
 
-      - name: Upload dependency scan results
+          echo "🔍 Evaluating security scan results..."
+
+          # M0 Development Phase Policy:
+          # - Block if critical vulnerabilities > 0
+          # - Block if high vulnerabilities > 5
+          # - Warn but allow moderate vulnerabilities
+
+          if [ "$CRITICAL_VULNS" -gt 0 ]; then
+            echo "❌ CRITICAL vulnerabilities found: $CRITICAL_VULNS"
+            echo "Critical vulnerabilities must be fixed before merge"
+            echo "passed=false" >> $GITHUB_OUTPUT
+          elif [ "$HIGH_VULNS" -gt 5 ]; then
+            echo "❌ Too many HIGH vulnerabilities: $HIGH_VULNS (limit: 5)"
+            echo "Please update dependencies to reduce high vulnerabilities"
+            echo "passed=false" >> $GITHUB_OUTPUT
+          elif [ "$TOTAL_VULNS" -gt 20 ]; then
+            echo "⚠️ High total vulnerability count: $TOTAL_VULNS"
+            echo "Consider dependency updates, but allowing for M0 development"
+            echo "passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Security scan passed (M0 development criteria)"
+            echo "Total vulnerabilities: $TOTAL_VULNS (acceptable for development phase)"
+            echo "passed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload vulnerability scan reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: dependency-scan-results-${{ github.run_id }}
+          name: security-scan-reports-${{ github.run_id }}
           path: |
-            dependency-audit.json
-            installed-packages.json
+            pip-audit-report.json
+            pip-audit-readable.txt
             safety-report.json
           retention-days: 30
 
   # =============================================================================
   # License Compliance Check
   # =============================================================================
-  license-check:
-    name: License Compliance
+  license-compliance:
+    name: License Compliance Check
     runs-on: ubuntu-latest
 
     outputs:
@@ -200,126 +255,233 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Install license checker
+      - name: Install license checking tools
         run: |
-          pip install pip-licenses
+          pip install pip-licenses licensecheck
 
-      - name: Check licenses
+      - name: Install dependencies for license check
         run: |
-          echo "📋 Checking package licenses..."
+          echo "📦 Installing dependencies for license analysis..."
 
-          # Install dependencies first
+          # Install base dependencies
           if [ -f "requirements/base.txt" ]; then
-            pip install -r requirements/base.txt || echo "Some packages failed to install"
+            pip install -r requirements/base.txt || echo "Some packages failed"
           fi
 
-          # Generate license report
-          pip-licenses --format=json --output-file=license-report.json || echo "License check completed with warnings"
+      - name: Generate license report
+        run: |
+          echo "📋 Generating license compliance report..."
 
-          # Display license summary
-          echo "📊 License Summary:"
-          pip-licenses --summary || echo "License summary completed"
+          # Generate comprehensive license report
+          pip-licenses --format=json --output-file=license-report.json --with-urls --with-description || echo "License report completed"
+
+          # Generate human-readable summary
+          echo "📊 License Summary:" > license-summary.txt
+          echo "==================" >> license-summary.txt
+          pip-licenses --format=plain >> license-summary.txt || echo "Summary completed"
+
+          # Show summary in logs
+          echo "📋 Current License Summary:"
+          pip-licenses --summary || echo "Summary completed"
 
       - name: Validate license compliance
+        id: license-result
         run: |
           echo "🔍 Validating license compliance..."
 
-          # Define allowed licenses
-          ALLOWED_LICENSES="MIT|Apache|BSD|ISC|Python"
+          # Define allowed licenses (permissive only)
+          ALLOWED_LICENSES="MIT|Apache|BSD|ISC|Python|PSF"
 
           # Check for problematic licenses
-          PROBLEMATIC=$(pip-licenses --format=plain | grep -v -E "$ALLOWED_LICENSES" | grep -v "License" | head -10 || echo "")
+          PROBLEMATIC_COUNT=0
 
-          if [ -n "$PROBLEMATIC" ]; then
-            echo "⚠️  Found packages with non-standard licenses:"
-            echo "$PROBLEMATIC"
-            echo ""
-            echo "Please review these licenses for compliance"
-          else
-            echo "✅ All licenses appear to be compatible"
+          if command -v pip-licenses &> /dev/null; then
+            # Count packages with non-allowed licenses
+            PROBLEMATIC_COUNT=$(pip-licenses --format=plain --no-version | \
+              grep -v -E "$ALLOWED_LICENSES" | \
+              grep -v "License" | \
+              grep -v "^$" | \
+              wc -l)
           fi
 
-      - name: Set license result
-        id: license-result
-        run: |
-          echo "passed=true" >> $GITHUB_OUTPUT
-          echo "✅ License compliance check completed"
+          echo "📊 License compliance results:"
+          echo "- Problematic licenses found: $PROBLEMATIC_COUNT"
 
-      - name: Upload license report
+          if [ "$PROBLEMATIC_COUNT" -gt 5 ]; then
+            echo "❌ Too many packages with non-standard licenses: $PROBLEMATIC_COUNT"
+            echo "Please review license compatibility"
+            echo "passed=false" >> $GITHUB_OUTPUT
+          else
+            echo "✅ License compliance acceptable for M0 development"
+            echo "Non-standard licenses: $PROBLEMATIC_COUNT (under limit of 5)"
+            echo "passed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload license reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: license-report-${{ github.run_id }}
-          path: license-report.json
+          name: license-reports-${{ github.run_id }}
+          path: |
+            license-report.json
+            license-summary.txt
           retention-days: 30
 
   # =============================================================================
-  # Dependency Summary
+  # Dependency Summary and Status
   # =============================================================================
   dependency-summary:
-    name: Dependency Summary
+    name: Dependency Review Summary
     runs-on: ubuntu-latest
-    needs: [dependency-review, dependency-scan, license-check]
+    needs: [github-dependency-review, security-scan, license-compliance]
     if: always()
 
     outputs:
-      dependency-passed: ${{ steps.summary.outputs.dependency-passed }}
+      dependency-passed: ${{ steps.final-result.outputs.dependency-passed }}
 
     steps:
-      - name: Generate dependency summary
-        id: summary
+      - name: Collect results
+        id: collect-results
         run: |
-          echo "# 📦 Harbor Dependency Review Summary" > dependency-summary.md
-          echo "Generated on: $(date -u)" >> dependency-summary.md
+          echo "📊 Collecting dependency review results..."
+
+          # Get individual job results
+          GITHUB_REVIEW_RESULT="${{ needs.github-dependency-review.result }}"
+          SECURITY_SCAN_RESULT="${{ needs.security-scan.result }}"
+          LICENSE_CHECK_RESULT="${{ needs.license-compliance.result }}"
+
+          # Get detailed outputs
+          SECURITY_PASSED="${{ needs.security-scan.outputs.scan-passed }}"
+          LICENSE_PASSED="${{ needs.license-compliance.outputs.license-passed }}"
+          VULN_COUNT="${{ needs.security-scan.outputs.vulnerability-count }}"
+
+          echo "github-review=$GITHUB_REVIEW_RESULT" >> $GITHUB_OUTPUT
+          echo "security-scan=$SECURITY_SCAN_RESULT" >> $GITHUB_OUTPUT
+          echo "license-check=$LICENSE_CHECK_RESULT" >> $GITHUB_OUTPUT
+          echo "security-passed=$SECURITY_PASSED" >> $GITHUB_OUTPUT
+          echo "license-passed=$LICENSE_PASSED" >> $GITHUB_OUTPUT
+          echo "vulnerability-count=$VULN_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Generate summary report
+        run: |
+          echo "# 🔒 Harbor Dependency Review Summary" > dependency-summary.md
           echo "" >> dependency-summary.md
+          echo "**Generated**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> dependency-summary.md
+          echo "**Event**: ${{ github.event_name }}" >> dependency-summary.md
+          echo "**Branch**: ${{ github.ref_name }}" >> dependency-summary.md
+          echo "**Milestone**: M0 (Foundation)" >> dependency-summary.md
+          echo "" >> dependency-summary.md
+
           echo "## 📊 Review Results" >> dependency-summary.md
-          echo "- 🔍 Dependency Review: ${{ needs.dependency-review.result }}" >> dependency-summary.md
-          echo "- 🛡️ Security Scan: ${{ needs.dependency-scan.result }}" >> dependency-summary.md
-          echo "- 📋 License Check: ${{ needs.license-check.result }}" >> dependency-summary.md
           echo "" >> dependency-summary.md
 
-          # Check individual results
-          REVIEW_PASSED="${{ needs.dependency-review.outputs.review-passed }}"
-          SCAN_PASSED="${{ needs.dependency-scan.outputs.scan-passed }}"
-          LICENSE_PASSED="${{ needs.license-check.outputs.license-passed }}"
-
-          echo "## 📋 Detailed Results" >> dependency-summary.md
-          echo "- Review: ${REVIEW_PASSED:-skipped}" >> dependency-summary.md
-          echo "- Security: ${SCAN_PASSED:-skipped}" >> dependency-summary.md
-          echo "- Licenses: ${LICENSE_PASSED:-skipped}" >> dependency-summary.md
-          echo "" >> dependency-summary.md
-
-          # Determine overall result
-          if [[ ("${{ needs.dependency-review.result }}" == "success" || "${{ needs.dependency-review.result }}" == "skipped") && \
-                "${{ needs.dependency-scan.result }}" == "success" && \
-                "${{ needs.license-check.result }}" == "success" ]]; then
-            echo "dependency-passed=true" >> $GITHUB_OUTPUT
-            echo "## ✅ Overall Result: PASSED" >> dependency-summary.md
-            echo "" >> dependency-summary.md
-            echo "All dependency checks completed successfully!" >> dependency-summary.md
+          # GitHub Dependency Review
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if [ "${{ needs.github-dependency-review.result }}" = "success" ]; then
+              echo "- ✅ **GitHub Dependency Review**: Passed" >> dependency-summary.md
+            else
+              echo "- ❌ **GitHub Dependency Review**: Failed" >> dependency-summary.md
+            fi
           else
-            echo "dependency-passed=false" >> $GITHUB_OUTPUT
-            echo "## ⚠️ Overall Result: NEEDS ATTENTION" >> dependency-summary.md
-            echo "" >> dependency-summary.md
-            echo "Some dependency checks found issues that may need review." >> dependency-summary.md
+            echo "- ⏭️ **GitHub Dependency Review**: Skipped (not a PR)" >> dependency-summary.md
+          fi
+
+          # Security Scan
+          if [ "${{ needs.security-scan.result }}" = "success" ]; then
+            if [ "${{ steps.collect-results.outputs.security-passed }}" = "true" ]; then
+              echo "- ✅ **Security Scan**: Passed" >> dependency-summary.md
+            else
+              echo "- ⚠️ **Security Scan**: Completed with warnings" >> dependency-summary.md
+            fi
+          else
+            echo "- ❌ **Security Scan**: Failed" >> dependency-summary.md
+          fi
+
+          # License Check
+          if [ "${{ needs.license-compliance.result }}" = "success" ]; then
+            if [ "${{ steps.collect-results.outputs.license-passed }}" = "true" ]; then
+              echo "- ✅ **License Compliance**: Passed" >> dependency-summary.md
+            else
+              echo "- ⚠️ **License Compliance**: Needs review" >> dependency-summary.md
+            fi
+          else
+            echo "- ❌ **License Compliance**: Failed" >> dependency-summary.md
           fi
 
           echo "" >> dependency-summary.md
-          echo "## 📝 Notes" >> dependency-summary.md
-          echo "- Dependency reports are available as workflow artifacts" >> dependency-summary.md
-          echo "- JSON format reports can be downloaded for detailed analysis" >> dependency-summary.md
-          echo "- License compliance is checked against common open-source licenses" >> dependency-summary.md
-          echo "- This is a development-phase dependency scan (M0 milestone)" >> dependency-summary.md
+          echo "## 📈 Security Details" >> dependency-summary.md
           echo "" >> dependency-summary.md
-          echo "## 🎯 Current Status" >> dependency-summary.md
-          echo "- **Milestone**: M0 (Foundation)" >> dependency-summary.md
-          echo "- **Focus**: Establishing core dependencies and security baseline" >> dependency-summary.md
+          echo "- **Vulnerabilities Found**: ${{ steps.collect-results.outputs.vulnerability-count }}" >> dependency-summary.md
+          echo "- **Scan Status**: ${{ steps.collect-results.outputs.security-passed }}" >> dependency-summary.md
+          echo "" >> dependency-summary.md
 
+          echo "## 📋 M0 Development Policy" >> dependency-summary.md
+          echo "" >> dependency-summary.md
+          echo "During M0 milestone development:" >> dependency-summary.md
+          echo "- Critical vulnerabilities: ❌ **Block**" >> dependency-summary.md
+          echo "- High vulnerabilities: ⚠️ **Limit to 5**" >> dependency-summary.md
+          echo "- Moderate vulnerabilities: ✅ **Allow**" >> dependency-summary.md
+          echo "- License compatibility: ✅ **Require permissive licenses**" >> dependency-summary.md
+          echo "" >> dependency-summary.md
+
+          echo "## 📄 Reports Available" >> dependency-summary.md
+          echo "" >> dependency-summary.md
+          echo "The following detailed reports are available as workflow artifacts:" >> dependency-summary.md
+          echo "- `security-scan-reports-${{ github.run_id }}` - Vulnerability scan results" >> dependency-summary.md
+          echo "- `license-reports-${{ github.run_id }}` - License compliance analysis" >> dependency-summary.md
+          echo "" >> dependency-summary.md
+
+          # Display the summary
           cat dependency-summary.md
 
-      - name: Upload dependency summary
+      - name: Determine final result
+        id: final-result
+        run: |
+          # Final result determination for M0 milestone
+          GITHUB_OK="true"
+          SECURITY_OK="${{ steps.collect-results.outputs.security-passed }}"
+          LICENSE_OK="${{ steps.collect-results.outputs.license-passed }}"
+
+          # For PRs, check GitHub dependency review
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if [ "${{ needs.github-dependency-review.result }}" != "success" ]; then
+              GITHUB_OK="false"
+            fi
+          fi
+
+          echo "🔍 Final result determination:"
+          echo "- GitHub Review OK: $GITHUB_OK"
+          echo "- Security Scan OK: $SECURITY_OK"
+          echo "- License Check OK: $LICENSE_OK"
+
+          if [ "$GITHUB_OK" = "true" ] && [ "$SECURITY_OK" = "true" ] && [ "$LICENSE_OK" = "true" ]; then
+            echo "✅ Overall dependency review: PASSED"
+            echo "dependency-passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Overall dependency review: FAILED"
+            echo "Please review the individual check results above"
+            echo "dependency-passed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload final summary
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: dependency-summary-${{ github.run_id }}
+          name: dependency-review-summary-${{ github.run_id }}
           path: dependency-summary.md
           retention-days: 30
+
+      - name: Comment PR with summary (if PR)
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request' && always()
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('dependency-summary.md', 'utf8');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });
