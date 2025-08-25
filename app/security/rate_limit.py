@@ -261,10 +261,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             "authorization"
         )
         if api_key:
-            # Use hash of API key as identifier
-            import hashlib
+            if len(api_key) > 16:
+                key_prefix = api_key[:16]
+            else:
+                key_prefix = api_key
 
-            return f"api_key:{hashlib.sha256(api_key.encode()).hexdigest()[:16]}"
+            return f"api_key:{key_prefix}"
 
         # Fall back to IP address
         client_ip = self._get_client_ip(request)

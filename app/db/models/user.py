@@ -122,7 +122,7 @@ class User(BaseModel):
 
     # Relationships
     api_keys: Mapped[list["APIKey"]] = relationship(
-        "APIKey",
+        "APIKey",  # String reference
         back_populates="created_by",
         cascade="all, delete-orphan",
         lazy="select",

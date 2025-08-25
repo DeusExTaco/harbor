@@ -436,11 +436,14 @@ def get_security_headers_for_profile(profile: DeploymentProfile) -> dict[str, st
 if __name__ == "__main__":
     """Security headers testing and utilities"""
 
-    print("🔒 Harbor Security Headers Middleware")
+    print("🔐 Harbor Security Headers Middleware")
     print("=" * 40)
 
-    # Test headers for different profiles
-    for profile in DeploymentProfile:
+    # FIX: Import DeploymentProfile when running as main
+    from app.config import DeploymentProfile
+
+    # FIX: Properly iterate over enum members
+    for profile in DeploymentProfile:  # This iterates over the enum members
         print(f"\n{profile.value.title()} Profile Headers:")
         headers = get_security_headers_for_profile(profile)
 

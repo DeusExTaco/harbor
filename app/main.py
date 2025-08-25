@@ -7,7 +7,7 @@ Implements M0 milestone - Foundation phase with complete database integration.
 
 Features:
 - Configuration system integration
-- Security middleware setup (M0 implementation) - FIXED IMPORTS
+- Security middleware setup (M0 implementation)
 - Database initialization and session management (M0 implementation)
 - Health check endpoints with database status
 - Profile-aware application setup
@@ -23,6 +23,7 @@ TODO: Implement remaining Harbor functionality according to milestone roadmap:
 - M6: Release & Launch
 """
 
+import logging
 import os
 import sys
 from collections.abc import AsyncGenerator
@@ -36,17 +37,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import __description__, __milestone__, __status__, __version__
 
 
+# Set up logger
+logger = logging.getLogger(__name__)
+
 # Import configuration system (M0 implementation)
 try:
     from app.config import (
         get_config_summary,
         get_settings,
+        is_development,
         validate_runtime_requirements,
     )
 
     CONFIG_AVAILABLE = True
 except ImportError:
     CONFIG_AVAILABLE = False
+
+    def is_development() -> bool:
+        """Fallback for development check"""
+        return os.getenv("HARBOR_MODE", "homelab") == "development"
+
 
 # Import database system (M0 implementation)
 try:
@@ -60,7 +70,7 @@ try:
 except ImportError:
     DATABASE_AVAILABLE = False
 
-# Import security middleware (M0 implementation) - FIXED IMPORTS
+# Import security middleware (M0 implementation)
 try:
     from app.security import setup_security_middleware
     from app.security.headers import SecurityHeadersMiddleware
@@ -111,6 +121,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
             print(f"📁 Data directory: {settings.data_dir}")
 
         except Exception as e:
+            logger.error(f"Configuration system error: {e}")
             print(f"⚠️ Configuration system error: {e}")
             startup_success = False
     else:
@@ -148,9 +159,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
                         print(f"💾 Database size: {db_info['size_mb']} MB")
 
                 except Exception as e:
+                    logger.warning(f"Could not get database info: {e}")
                     print(f"⚠️ Could not get database info: {e}")
 
         except Exception as e:
+            logger.error(f"Database initialization failed: {e}")
             print(f"❌ Database initialization failed: {e}")
             startup_success = False
     elif not DATABASE_AVAILABLE:
@@ -159,7 +172,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
 
     # Security middleware status (M0 implementation)
     if SECURITY_AVAILABLE:
-        print("🔒 Security middleware: ✅ Enabled")
+        print("🔐 Security middleware: ✅ Enabled")
         print("  - Security headers: ✅")
         print("  - Rate limiting: ✅")
         print("  - Input validation: ✅")
@@ -186,6 +199,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
             print("✅ Database connections closed")
 
     except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
         print(f"❌ Error during shutdown: {e}")
 
     print("✅ Harbor application shutdown completed")
@@ -239,12 +253,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Set up security middleware (M0 milestone) - UPDATED WITH CORRECT IMPORTS
+    # Set up security middleware (M0 milestone)
     if SECURITY_AVAILABLE:
         try:
             # Method 1: Use the setup function from security module
             app = setup_security_middleware(app)
-            print("🔒 Security middleware configured via setup function")
+            print("🔐 Security middleware configured via setup function")
 
         except Exception as e:
             # Method 2: Fallback to manual middleware setup
@@ -253,8 +267,9 @@ def create_app() -> FastAPI:
                 app.add_middleware(RateLimitMiddleware)
                 app.add_middleware(SecurityHeadersMiddleware)
 
-                print("🔒 Security middleware configured manually")
+                print("🔐 Security middleware configured manually")
             except Exception as e2:
+                logger.error(f"Security middleware setup failed: {e2}, original: {e}")
                 print(f"⚠️ Security middleware setup failed: {e2}")
                 print(f"Original setup error: {e}")
     else:
@@ -318,7 +333,13 @@ def create_app() -> FastAPI:
                         health_data["database"]["size_mb"] = db_info["size_mb"]
 
                 except Exception as e:
-                    health_data["database"] = {"status": "error", "error": str(e)}
+                    logger.error(f"Database health check error: {e}")
+                    health_data["database"] = {
+                        "status": "error",
+                        "error": "Database unavailable"
+                        if not is_development()
+                        else str(e),
+                    }
                     health_data["status"] = "degraded"
 
             # Add timestamp
@@ -329,11 +350,14 @@ def create_app() -> FastAPI:
             return health_data
 
         except Exception as e:
+            logger.error(f"Health check failed: {e}")
+
+            # SECURITY FIX: Don't expose error details in production
             return {
                 "status": "unhealthy",
-                "error": str(e),
                 "version": __version__,
                 "milestone": __milestone__,
+                "error": "Health check failed" if not is_development() else str(e),
             }
 
     # Readiness check endpoint with database validation
@@ -367,8 +391,12 @@ def create_app() -> FastAPI:
                     ready_data["ready"] = False
                     ready_data["config_errors"] = errors
             except Exception as e:
+                logger.error(f"Config error in readiness check: {e}")
                 ready_data["ready"] = False
-                ready_data["config_error"] = str(e)
+                # SECURITY FIX: Don't expose error details in production
+                ready_data["config_error"] = (
+                    "Configuration error" if not is_development() else str(e)
+                )
         else:
             ready_data["ready"] = False
             ready_data["components"]["configuration"] = False
@@ -391,8 +419,11 @@ def create_app() -> FastAPI:
                     ready_data["database_error"] = "Essential tables missing"
 
             except Exception as e:
+                logger.error(f"Database readiness error: {e}")
                 ready_data["ready"] = False
-                ready_data["database_error"] = str(e)
+                ready_data["database_error"] = (
+                    "Database check failed" if not is_development() else str(e)
+                )
                 ready_data["components"]["database"] = False
         else:
             ready_data["ready"] = False
@@ -444,7 +475,14 @@ def create_app() -> FastAPI:
                 return status_data
 
             except Exception as e:
-                return {"status": "error", "error": str(e), "milestone": "M0"}
+                logger.error(f"Database status error: {e}")
+                return {
+                    "status": "error",
+                    "error": "Database status unavailable"
+                    if not is_development()
+                    else str(e),
+                    "milestone": "M0",
+                }
 
         @app.get("/database/health")
         async def database_health() -> dict[str, Any]:
@@ -476,7 +514,14 @@ def create_app() -> FastAPI:
                     }
 
             except Exception as e:
-                return {"status": "unhealthy", "connection": "error", "error": str(e)}
+                logger.error(f"Database health check error: {e}")
+                return {
+                    "status": "unhealthy",
+                    "connection": "error",
+                    "error": "Database health check failed"
+                    if not is_development()
+                    else str(e),
+                }
 
     # Basic info endpoint
     @app.get("/")
@@ -584,7 +629,7 @@ def create_app() -> FastAPI:
 
         return version_data
 
-    # Security status endpoint (M0 implementation) - UPDATED FOR NEW STRUCTURE
+    # Security status endpoint (M0 implementation)
     @app.get("/security/status")
     def security_status() -> dict[str, Any]:
         """Security status endpoint showing enabled security features."""
@@ -599,7 +644,7 @@ def create_app() -> FastAPI:
                 },
                 "version": "1.0" if SECURITY_AVAILABLE else "unavailable",
                 "milestone": "M0",
-                "implementation": "app.security module",  # Updated to reflect actual structure
+                "implementation": "app.security module",
             },
             "profile": deployment_profile,
         }
@@ -635,7 +680,10 @@ def create_app() -> FastAPI:
                     pass
 
             except Exception as e:
-                security_data["configuration_error"] = str(e)
+                logger.error(f"Security status config error: {e}")
+                security_data["configuration_error"] = (
+                    "Configuration unavailable" if not is_development() else str(e)
+                )
 
         return security_data
 
@@ -679,10 +727,12 @@ def create_app() -> FastAPI:
                         db_info = asyncio.run(get_database_info())
                         config_summary["database"] = db_info
                     except Exception as e:
+                        logger.error(f"Config database info error: {e}")
                         config_summary["database_error"] = str(e)
 
                 return config_summary
             except Exception as e:
+                logger.error(f"Config info error: {e}")
                 return {"error": str(e)}
 
     # Development endpoints for database testing
@@ -719,7 +769,12 @@ def create_app() -> FastAPI:
                 return results
 
             except Exception as e:
-                return {"status": "error", "error": str(e)}
+                logger.error(f"Database test failed: {e}")
+                # SECURITY FIX: Show full error only in debug mode
+                return {
+                    "status": "error",
+                    "error": str(e) if debug_mode else "Database test failed",
+                }
 
     # Security testing endpoint (development only)
     if debug_mode and SECURITY_AVAILABLE:
@@ -757,7 +812,12 @@ def create_app() -> FastAPI:
                 }
 
             except Exception as e:
-                return {"status": "error", "error": str(e)}
+                logger.error(f"Security test failed: {e}")
+                # SECURITY FIX: Show full error only in debug mode
+                return {
+                    "status": "error",
+                    "error": str(e) if debug_mode else "Security test failed",
+                }
 
     return app
 
@@ -823,7 +883,7 @@ def main() -> None:
         print()
 
     if SECURITY_AVAILABLE:
-        print("🔒 Security endpoints:")
+        print("🔐 Security endpoints:")
         print("  curl http://localhost:8080/security/status | jq .")
         print(
             "  curl -I http://localhost:8080/ | grep -E '(X-|Content-Security|Strict-Transport)'"

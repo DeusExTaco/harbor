@@ -243,7 +243,18 @@ class PaginatedRepository(SearchableRepository[ModelType]):
         order_by: str | None = None,
         **filters: Any,
     ) -> PaginatedResult[ModelType]:
-        """Paginate query results"""
+        """
+        Paginate query results with filtering and ordering.
+
+        Args:
+            page: Page number (1-based)
+            per_page: Items per page (max 100)
+            order_by: Field name to order by
+            **filters: Field filters to apply
+
+        Returns:
+            PaginatedResult containing items and pagination metadata
+        """
         # Validate pagination parameters
         page = max(1, page)
         per_page = min(max(1, per_page), 100)  # Limit to 100 items per page
@@ -251,9 +262,11 @@ class PaginatedRepository(SearchableRepository[ModelType]):
         # Build base query
         stmt = select(self.model_class)
 
+        # FIX: Initialize conditions list here to avoid undefined variable error
+        conditions = []  # Initialize before any usage
+
         # Apply filters
         if filters:
-            conditions = []
             for key, value in filters.items():
                 if hasattr(self.model_class, key):
                     column = getattr(self.model_class, key)
@@ -262,15 +275,14 @@ class PaginatedRepository(SearchableRepository[ModelType]):
                     else:
                         conditions.append(column == value)
 
-            if conditions:
-                stmt = stmt.where(and_(*conditions))
+        # Apply conditions to both main query and count query
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
 
-        # Count total items - need to handle the WHERE clause properly
+        # Count total items with same filters
         count_stmt = select(func.count(self.model_class.id))
-        if filters:
-            # Apply the same filters to count query
-            if conditions:
-                count_stmt = count_stmt.where(and_(*conditions))
+        if conditions:  # Use the same conditions for count query
+            count_stmt = count_stmt.where(and_(*conditions))
 
         total_result = await self.session.execute(count_stmt)
         total = total_result.scalar() or 0

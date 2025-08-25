@@ -5,11 +5,10 @@ Harbor Container Policy Model
 Container-specific update policies and configuration.
 Inherits from global defaults with per-container overrides.
 
-FIXED: Added proper imports to fix F821 errors for Container and User models
 """
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -17,13 +16,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import BaseModel
 
 
-class ContainerPolicy(BaseModel):
-    """
-    Container-specific update policy configuration
+if TYPE_CHECKING:
+    from app.db.models.container import Container
+    from app.db.models.user import User
 
-    Defines how and when a specific container should be updated.
-    Inherits from global defaults with per-container overrides.
-    """
+
+class ContainerPolicy(BaseModel):
+    """Container-specific update policy configuration"""
 
     __tablename__ = "container_policies"
 
@@ -138,9 +137,14 @@ class ContainerPolicy(BaseModel):
     from app.db.models.container import Container
     from app.db.models.user import User
 
-    container: Mapped[Container] = relationship("Container", back_populates="policy")
-    created_by_user: Mapped[User | None] = relationship(
-        "User", foreign_keys=[created_by_user_id]
+    container: Mapped["Container"] = relationship(
+        "Container",  # String reference
+        back_populates="policy",
+    )
+
+    created_by_user: Mapped["User | None"] = relationship(
+        "User",  # String reference
+        foreign_keys=[created_by_user_id],
     )
 
     def __repr__(self) -> str:

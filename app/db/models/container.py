@@ -7,7 +7,7 @@ and comprehensive state tracking for automatic updates.
 """
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -193,9 +193,8 @@ class Container(BaseModel):
         ),
     )
 
-    # Relationships
-    policy: Mapped[Optional["ContainerPolicy"]] = relationship(
-        "ContainerPolicy",
+    policy: Mapped["ContainerPolicy | None"] = relationship(
+        "ContainerPolicy",  # String reference
         back_populates="container",
         uselist=False,
         cascade="all, delete-orphan",

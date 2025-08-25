@@ -704,10 +704,17 @@ def detect_environment() -> dict[str, Any]:
     # Get platform information
     system_info = platform.uname()
 
-    # Detect if we're in a container
-    is_container = os.path.exists("/.dockerenv") or (
-        os.path.exists("/proc/1/cgroup") and "docker" in open("/proc/1/cgroup").read()
-    )
+    # Detect if we're in a container - FIX: Use context manager
+    is_container = os.path.exists("/.dockerenv")
+    if not is_container and os.path.exists("/proc/1/cgroup"):
+        try:
+            with open(
+                "/proc/1/cgroup"
+            ) as f:  # Use context manager to ensure file is closed
+                cgroup_content = f.read()
+                is_container = "docker" in cgroup_content
+        except OSError:
+            is_container = False
 
     # Detect if we're in cloud environment
     is_cloud = any(
@@ -721,9 +728,9 @@ def detect_environment() -> dict[str, Any]:
 
     cpu_count = os.cpu_count() or 1
 
-    # Memory detection (basic)
+    # Memory detection (basic) - FIX: Also use context manager here
     try:
-        with open("/proc/meminfo") as f:
+        with open("/proc/meminfo") as f:  # Use context manager
             meminfo = f.read()
             mem_total_kb = int(
                 [
@@ -733,7 +740,7 @@ def detect_environment() -> dict[str, Any]:
                 ][0]
             )
             mem_total_gb = mem_total_kb / 1024 / 1024
-    except:
+    except (OSError, IndexError, ValueError):
         mem_total_gb = 1  # Default fallback
 
     # Suggest profile based on environment

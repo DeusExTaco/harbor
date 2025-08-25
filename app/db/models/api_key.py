@@ -108,7 +108,9 @@ class APIKey(BaseModel):
 
     # Relationships
     created_by: Mapped["User"] = relationship(
-        "User", back_populates="api_keys", lazy="select"
+        "User",  # String reference to avoid import
+        back_populates="api_keys",
+        lazy="select",
     )
 
     def __repr__(self) -> str:
