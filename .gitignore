@@ -46,6 +46,7 @@ logs/
 backups/
 cache/
 uploads/
+node_modules/
 harbor.db*
 
 # Testing

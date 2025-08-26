@@ -140,7 +140,6 @@ languages:
 # Only report issues of this severity or higher
 # Options: error, warning, recommendation
 minimum-severity: warning
-
 # Custom queries (optional)
 # You can add custom CodeQL queries here
 # custom-queries:
