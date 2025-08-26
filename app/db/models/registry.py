@@ -258,12 +258,31 @@ class Registry(BaseModel):
         except json.JSONDecodeError:
             return {}
 
-    def to_dict(self, include_sensitive: bool = False) -> dict[str, Any]:
-        """Convert registry to dictionary"""
-        result = super().to_dict()
+    def to_dict(self, **kwargs: Any) -> dict[str, Any]:
+        """
+        Convert registry to dictionary.
 
-        # Never include encrypted password
-        result.pop("password_encrypted", None)
+        Args:
+            **kwargs: Options including:
+                - include_sensitive: Whether to include sensitive fields
+                - exclude: Set of fields to exclude
+                - include_timestamps: Whether to include timestamps
+
+        Returns:
+            Dictionary representation
+        """
+        include_sensitive = kwargs.get("include_sensitive", False)
+        exclude = set(kwargs.get("exclude", set()))
+
+        # Never include encrypted password unless explicitly requested
+        if not include_sensitive:
+            exclude.add("password_encrypted")
+
+        # Update kwargs with modified exclude set
+        kwargs["exclude"] = exclude
+
+        # Call parent with updated kwargs
+        result = super().to_dict(**kwargs)
 
         # Parse JSON fields
         result["auth_config"] = self.get_auth_config()

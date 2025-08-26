@@ -399,9 +399,20 @@ class SystemSettings(SingletonModel):
 
         return self.is_maintenance_day() and self.is_in_maintenance_window()
 
-    def to_dict(self, include_timestamps: bool = True) -> dict[str, Any]:
-        """Convert to dictionary - override with proper signature"""
-        result = super().to_dict(include_timestamps=include_timestamps)
+    def to_dict(self, **kwargs: Any) -> dict[str, Any]:
+        """
+        Convert to dictionary.
+
+        Args:
+            **kwargs: Options including:
+                - exclude: Set of fields to exclude
+                - include_timestamps: Whether to include timestamps
+
+        Returns:
+            Dictionary representation
+        """
+        # Call parent with kwargs
+        result = super().to_dict(**kwargs)
 
         # Add parsed JSON fields
         result["maintenance_days"] = self.get_maintenance_days()

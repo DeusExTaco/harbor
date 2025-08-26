@@ -11,6 +11,8 @@ import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -136,18 +138,56 @@ class User(BaseModel):
         lazy="select",
     )
 
+    # Password hasher (class level)
+    _password_hasher = PasswordHasher(
+        time_cost=2,  # Iterations
+        memory_cost=65536,  # 64MB memory
+        parallelism=1,  # Single thread
+        hash_len=32,  # Hash length
+        salt_len=16,  # Salt length
+    )
+
     def __repr__(self) -> str:
         return (
             f"<User(id={self.id}, username='{self.username}', admin={self.is_admin})>"
         )
 
+    def set_password(self, password: str) -> None:
+        """
+        Set user password (hashes the password).
+
+        Args:
+            password: Plain text password to hash
+        """
+        self.password_hash = self._password_hasher.hash(password)
+
+    def verify_password(self, password: str) -> bool:
+        """
+        Verify a password against the stored hash.
+
+        Args:
+            password: Plain text password to verify
+
+        Returns:
+            True if password matches
+        """
+        try:
+            # Verify and check if rehash needed
+            self._password_hasher.verify(self.password_hash, password)
+
+            # Check if password needs rehashing (parameters changed)
+            if self._password_hasher.check_needs_rehash(self.password_hash):
+                self.password_hash = self._password_hasher.hash(password)
+
+            return True
+
+        except (VerifyMismatchError, VerificationError, InvalidHashError):
+            return False
+
     def record_login(self) -> None:
         """Record successful login attempt"""
         # Initialize login_count if it's None (for existing records)
-        if self.login_count is None:
-            self.login_count = 0
-
-        self.login_count += 1
+        self.login_count = self.login_count + 1 if self.login_count else 1
         self.last_login_at = datetime.now(UTC)
         self.update_timestamp()
 
@@ -209,17 +249,32 @@ class User(BaseModel):
         self.mfa_backup_codes = json.dumps(codes, sort_keys=True)
         self.update_timestamp()
 
-    def to_dict(self, include_sensitive: bool = False) -> dict[str, Any]:
-        """Convert user to dictionary"""
-        result = super().to_dict()
+    def to_dict(self, **kwargs: Any) -> dict[str, Any]:
+        """
+        Convert user to dictionary.
 
-        # Never include password hash
-        result.pop("password_hash", None)
+        Args:
+            **kwargs: Additional options:
+                - include_sensitive: Include sensitive data (default: False)
+                - exclude: Set of fields to exclude
+                - include_timestamps: Whether to include timestamps (default: True)
 
-        # Remove sensitive MFA data unless requested
+        Returns:
+            Dictionary representation
+        """
+        include_sensitive = kwargs.get("include_sensitive", False)
+        exclude = set(kwargs.get("exclude", set()))
+
+        # Never include password hash unless explicitly requested
         if not include_sensitive:
-            result.pop("mfa_secret", None)
-            result.pop("mfa_backup_codes", None)
+            exclude.add("password_hash")
+            exclude.add("mfa_secret")
+            exclude.add("mfa_backup_codes")
+
+        # Update kwargs with modified exclude set
+        kwargs["exclude"] = exclude
+
+        result = super().to_dict(**kwargs)
 
         # Parse JSON fields
         result["roles"] = self.get_roles()

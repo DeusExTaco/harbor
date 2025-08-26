@@ -6,6 +6,7 @@ Data access layer for container management operations.
 Provides CRUD operations and business logic for container entities.
 
 FIXED: Removed unused variable assignment to pass pre-commit checks
+FIXED: Handle potential None values in statistics
 """
 
 from typing import Any
@@ -195,7 +196,7 @@ class ContainerRepository(BaseRepository[Container]):
         # Count total results
         count_stmt = select(func.count()).select_from(stmt.subquery())
         count_result = await self.session.execute(count_stmt)
-        total = count_result.scalar()
+        total = count_result.scalar() or 0  # Handle None case
 
         # Apply pagination
         offset = (page - 1) * per_page
@@ -241,33 +242,34 @@ class ContainerRepository(BaseRepository[Container]):
             # Total containers
             total_stmt = select(func.count(Container.id))
             total_result = await self.session.execute(total_stmt)
-            total = total_result.scalar()
+            total = total_result.scalar() or 0  # Handle None
 
             # Managed containers
             managed_stmt = select(func.count(Container.id)).where(
                 Container.managed == True
             )
             managed_result = await self.session.execute(managed_stmt)
-            managed = managed_result.scalar()
+            managed = managed_result.scalar() or 0  # Handle None
 
             # Running containers
             running_stmt = select(func.count(Container.id)).where(
                 Container.status == "running"
             )
             running_result = await self.session.execute(running_stmt)
-            running = running_result.scalar()
+            running = running_result.scalar() or 0  # Handle None
 
             # Stopped containers
             stopped_stmt = select(func.count(Container.id)).where(
                 Container.status == "stopped"
             )
             stopped_result = await self.session.execute(stopped_stmt)
-            stopped = stopped_result.scalar()
+            stopped = stopped_result.scalar() or 0  # Handle None
 
             return {
                 "total_containers": total,
                 "managed_containers": managed,
-                "unmanaged_containers": total - managed,
+                "unmanaged_containers": total
+                - managed,  # Now safe with non-None values
                 "running_containers": running,
                 "stopped_containers": stopped,
                 "outdated_containers": 0,  # TODO M1: Implement

@@ -383,12 +383,20 @@ class Container(BaseModel):
             else None,
         }
 
-    def to_dict(self, include_timestamps: bool = True) -> dict[str, Any]:
-        """Convert container to dictionary - matching parent signature"""
-        base_dict = super().to_dict(include_timestamps=include_timestamps)
+    def to_dict(self, **kwargs: Any) -> dict[str, Any]:
+        """
+        Convert container to dictionary.
 
-        # Ensure we have a dictionary
-        result: dict[str, Any] = base_dict if isinstance(base_dict, dict) else {}
+        Args:
+            **kwargs: Options including:
+                - exclude: Set of fields to exclude
+                - include_timestamps: Whether to include timestamps
+
+        Returns:
+            Dictionary representation
+        """
+        # Call parent with kwargs
+        result = super().to_dict(**kwargs)
 
         # Parse JSON fields
         result["labels"] = self.get_labels()

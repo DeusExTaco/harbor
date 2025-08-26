@@ -238,9 +238,20 @@ class ContainerPolicy(BaseModel):
             return True  # No restrictions means updates allowed any day
         return day_name.lower() in update_days
 
-    def to_dict(self, include_timestamps: bool = True) -> dict[str, Any]:
-        """Convert to dictionary - matching parent signature"""
-        result = super().to_dict(include_timestamps=include_timestamps)
+    def to_dict(self, **kwargs: Any) -> dict[str, Any]:
+        """
+        Convert to dictionary.
+
+        Args:
+            **kwargs: Options including:
+                - exclude: Set of fields to exclude
+                - include_timestamps: Whether to include timestamps
+
+        Returns:
+            Dictionary representation
+        """
+        # Call parent with kwargs
+        result = super().to_dict(**kwargs)
 
         # Add parsed JSON fields
         result["update_days"] = self.get_update_days()
