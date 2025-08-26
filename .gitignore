@@ -8,25 +8,9 @@ __pycache__/
 .Python
 *.egg-info/
 *.egg
-MANIFEST
-.installed.cfg
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Distribution / packaging
-build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
+build/
 wheels/
-share/python-wheels/
 
 # =============================================================================
 # Virtual Environments
@@ -35,7 +19,6 @@ share/python-wheels/
 venv/
 ENV/
 env/
-.env
 
 # =============================================================================
 # IDE and Editors
@@ -43,7 +26,6 @@ env/
 # PyCharm
 .idea/
 *.iml
-*.iws
 
 # VS Code
 .vscode/
@@ -57,15 +39,12 @@ env/
 # =============================================================================
 # Environment and Configuration
 # =============================================================================
-# Environment files
 .env
 .env.*
 !.env.example
-
-# Local configuration
-local_settings.py
-local.yaml
-local.yml
+!.env.development  # Track development example if needed
+config/local.yaml
+config/local.yml
 
 # =============================================================================
 # Testing and Coverage
@@ -74,40 +53,29 @@ local.yml
 .coverage.*
 htmlcov/
 .pytest_cache/
-.tox/
+.mypy_cache/
+.ruff_cache/
 coverage.xml
 *.cover
 .hypothesis/
-nosetests.xml
-test.db*
-*_test.db
-integration_test.db*
 
 # =============================================================================
-# Development and Debug Files
+# Development Files
 # =============================================================================
-# Root-level test/debug scripts
+# Root-level test scripts
 /test_*.py
 /debug_*.py
-/*_test.py
-/simple_*.py
-/validate_*.py
-/check_*.py
-/tmp_*.py
-/temp_*.py
-/deep_*.py
 /scratch.py
 /playground.py
-/experiment*.py
 
-# Development scripts directory (if you want to keep some locally)
-scripts/dev/*
-!scripts/dev/.gitkeep
+# Development scripts (keep shell scripts)
+scripts/dev/*.py
+!scripts/dev/*.sh
 
 # =============================================================================
-# Harbor Application Specific
+# Harbor Application Data
 # =============================================================================
-# Runtime data
+# Runtime directories
 data/
 !data/.gitkeep
 logs/
@@ -119,55 +87,44 @@ uploads/
 # Database files
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
-harbor.db*
 
 # =============================================================================
-# Security and Reports
+# Alembic Migrations
 # =============================================================================
-# Security scan reports
+# Keep the migrations directory structure but ignore generated migrations
+# (you may want to track migrations in production)
+app/db/migrations/versions/*.py
+!app/db/migrations/versions/.gitkeep
+
+# =============================================================================
+# Security
+# =============================================================================
+# Security reports
 *-report.json
 *.security-report
-bandit-report.json
-safety-report.json
-trivy-results/
 
-# Secrets baseline (keep this)
+# Keep security baseline
 !.secrets.baseline
 
 # =============================================================================
 # Docker
 # =============================================================================
-.docker/
-**/docker-compose.override.yml
+docker-compose.override.yml
 !docker-compose.override.example.yml
-
-# =============================================================================
-# Node.js (if using any JS tools)
-# =============================================================================
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
-.npm/
 
 # =============================================================================
 # OS Files
 # =============================================================================
 # macOS
 .DS_Store
-.AppleDouble
-.LSOverride
 ._*
 
 # Windows
 Thumbs.db
-Thumbs.db:encryptable
-ehthumbs.db
 Desktop.ini
 
 # Linux
@@ -186,17 +143,8 @@ Desktop.ini
 *.orig
 
 # =============================================================================
-# Jupyter Notebooks (if used)
-# =============================================================================
-.ipynb_checkpoints/
-*.ipynb
-
-# =============================================================================
-# Documentation Build Files
+# Documentation
 # =============================================================================
 docs/_build/
 site/
-
-# Development scripts - track shell scripts but ignore Python test files
-scripts/dev/*.py
-!scripts/dev/*.sh
+mkdocs_build/

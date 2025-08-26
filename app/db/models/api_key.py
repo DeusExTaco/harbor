@@ -182,12 +182,31 @@ class APIKey(BaseModel):
         """Check if API key is valid for use"""
         return self.is_active and not self.is_expired() and not self.is_revoked()
 
-    def to_dict(self, include_sensitive: bool = False) -> dict[str, Any]:
-        """Convert API key to dictionary"""
-        result = super().to_dict()
+    def to_dict(self, **kwargs: Any) -> dict[str, Any]:
+        """
+        Convert API key to dictionary.
+
+        Args:
+            **kwargs: Options including:
+                - include_sensitive: Whether to include sensitive fields
+                - exclude: Set of fields to exclude
+                - include_timestamps: Whether to include timestamps
+
+        Returns:
+            Dictionary representation
+        """
+        include_sensitive = kwargs.get("include_sensitive", False)
+        exclude = set(kwargs.get("exclude", set()))
 
         # Never include the actual key hash
-        result.pop("key_hash", None)
+        if not include_sensitive:
+            exclude.add("key_hash")
+
+        # Update kwargs with modified exclude set
+        kwargs["exclude"] = exclude
+
+        # Call parent with updated kwargs
+        result = super().to_dict(**kwargs)
 
         # Parse JSON fields
         result["scopes"] = self.get_scopes()

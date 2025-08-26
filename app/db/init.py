@@ -7,6 +7,8 @@ first-time Harbor deployment.
 """
 
 import os
+import secrets
+import string
 from pathlib import Path
 from typing import Any
 
@@ -14,10 +16,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.config import DeploymentProfile, get_settings
-from app.db.base import Base
-from app.db.config import get_engine
-from app.db.models.settings import SystemSettings
-from app.db.session import get_async_session, get_session_manager
+from app.db.base import Base, import_all_models
+from app.db.config import get_engine, is_sqlite
+from app.db.session import get_async_session, initialize_session_manager
 from app.utils.logging import get_logger
 
 
@@ -25,7 +26,15 @@ logger = get_logger(__name__)
 
 
 async def create_tables(engine: AsyncEngine) -> None:
-    """Create all database tables"""
+    """
+    Create all database tables.
+
+    Args:
+        engine: AsyncEngine instance
+    """
+    # Import all models to ensure they're registered
+    import_all_models()
+
     async with engine.begin() as conn:
         # Create all tables from models
         await conn.run_sync(Base.metadata.create_all)
@@ -33,8 +42,27 @@ async def create_tables(engine: AsyncEngine) -> None:
     logger.info("Database tables created successfully")
 
 
+async def drop_tables(engine: AsyncEngine) -> None:
+    """
+    Drop all database tables (DANGEROUS!).
+
+    Args:
+        engine: AsyncEngine instance
+    """
+    async with engine.begin() as conn:
+        # Drop all tables
+        await conn.run_sync(Base.metadata.drop_all)
+
+    logger.warning("All database tables dropped")
+
+
 async def initialize_sqlite_settings(engine: AsyncEngine) -> None:
-    """Initialize SQLite-specific settings and optimizations"""
+    """
+    Initialize SQLite-specific settings and optimizations.
+
+    Args:
+        engine: AsyncEngine instance
+    """
     if not str(engine.url).startswith("sqlite"):
         return
 
@@ -48,7 +76,7 @@ async def initialize_sqlite_settings(engine: AsyncEngine) -> None:
         # Set synchronous mode for balance of safety and performance
         await conn.execute(text("PRAGMA synchronous = NORMAL"))
 
-        # Optimize cache size (in pages)
+        # Optimize cache size (in pages, negative means KB)
         await conn.execute(text("PRAGMA cache_size = -64000"))  # 64MB cache
 
         # Set busy timeout for better concurrency
@@ -60,17 +88,24 @@ async def initialize_sqlite_settings(engine: AsyncEngine) -> None:
     logger.info("SQLite optimization settings applied")
 
 
-async def seed_initial_data() -> None:
-    """Seed initial data for first-time setup"""
-    # Initialize the session manager before trying to use it
-    from app.db.session import get_session_manager
+async def seed_initial_data() -> str | None:
+    """
+    Seed initial data for first-time setup.
 
-    session_manager = get_session_manager()
-    await session_manager.initialize()
+    Returns:
+        Admin password if created, None otherwise
+    """
+    # Initialize the session manager first
+    await initialize_session_manager()
+
+    admin_password = None
 
     try:
         async with get_async_session() as session:
             settings = get_settings()
+
+            # Import models
+            from app.db.models.settings import SystemSettings
 
             # Check if system settings exist
             existing_settings = await session.get(SystemSettings, 1)
@@ -81,40 +116,94 @@ async def seed_initial_data() -> None:
 
                 session.add(system_settings)
                 await session.commit()
-                await session.refresh(system_settings)
 
                 logger.info(
                     f"Created initial system settings for {settings.deployment_profile.value} profile"
                 )
 
-            # In home lab mode, check if we need to create an admin user
+            # In home lab mode, create default admin user if needed
             if settings.deployment_profile == DeploymentProfile.HOMELAB:
-                # Check if any users exist
-                result = await session.execute(text("SELECT COUNT(*) FROM users"))
-                user_count = result.scalar()
+                from sqlalchemy import select
 
-                if user_count == 0:
-                    # No users exist - this will be handled by first-run setup
-                    logger.info(
-                        "No users found - first-run setup will create admin user"
+                from app.db.models.user import User
+
+                # Check if any users exist
+                result = await session.execute(select(User))
+                users = result.scalars().all()
+
+                if not users:
+                    # Generate secure password
+                    alphabet = string.ascii_letters + string.digits
+                    admin_password = "".join(
+                        secrets.choice(alphabet) for _ in range(16)
                     )
 
+                    # Create admin user (password will be hashed by the model)
+                    admin = User(
+                        username="admin",
+                        display_name="Administrator",
+                        email=None,
+                        is_admin=True,
+                        is_active=True,
+                    )
+                    admin.set_password(admin_password)
+
+                    session.add(admin)
+                    await session.commit()
+
+                    logger.info("Created default admin user")
+
+            # Add default Docker Hub registry
+            from sqlalchemy import select
+
+            from app.db.models.registry import Registry
+
+            result = await session.execute(
+                select(Registry).where(Registry.name == "docker.io")
+            )
+            existing_docker_hub = result.scalar_one_or_none()
+
+            if not existing_docker_hub:
+                new_registry = Registry(
+                    name="docker.io",
+                    endpoint="https://registry-1.docker.io",
+                    registry_type="docker",
+                    is_default=True,
+                    is_active=True,
+                )
+                session.add(new_registry)
+                await session.commit()
+
+                logger.info("Added Docker Hub as default registry")
+
             logger.info("Initial data seeding completed")
+            return admin_password
 
     except Exception as e:
-        logger.error(f"Failed to seed initial data: {e}")
+        logger.error(f"Failed to seed initial data: {e}", exc_info=True)
         raise
 
 
-async def check_database_health(engine: AsyncEngine) -> bool:
-    """Check database connectivity and basic health"""
+async def check_database_health(engine: AsyncEngine | None = None) -> bool:
+    """
+    Check database connectivity and basic health.
+
+    Args:
+        engine: Optional AsyncEngine instance (will create if not provided)
+
+    Returns:
+        True if database is healthy
+    """
     try:
+        if engine is None:
+            engine = await get_engine()
+
         async with engine.begin() as conn:
             # Test basic connectivity
             await conn.execute(text("SELECT 1"))
 
             # Check if tables exist
-            if str(engine.url).startswith("sqlite"):
+            if is_sqlite():
                 result = await conn.execute(
                     text(
                         "SELECT name FROM sqlite_master WHERE type='table' AND name='users'"
@@ -123,157 +212,243 @@ async def check_database_health(engine: AsyncEngine) -> bool:
             else:
                 result = await conn.execute(
                     text(
-                        "SELECT table_name FROM information_schema.tables WHERE table_name='users'"
+                        "SELECT table_name FROM information_schema.tables "
+                        "WHERE table_schema='public' AND table_name='users'"
                     )
                 )
 
             table_exists = result.scalar() is not None
 
-        logger.info("Database health check passed")
-        return table_exists
+        if table_exists:
+            logger.info("Database health check passed - tables exist")
+        else:
+            logger.info("Database health check passed - no tables yet")
+
+        return True
 
     except Exception as e:
         logger.error(f"Database health check failed: {e}")
         return False
 
 
-async def create_backup_directory() -> None:
-    """Create backup directory for home lab deployments"""
+async def create_backup_directory() -> Path:
+    """
+    Create backup directory for home lab deployments.
+
+    Returns:
+        Path to backup directory
+    """
     settings = get_settings()
 
-    if settings.deployment_profile == DeploymentProfile.HOMELAB:
-        data_dir = Path(os.getenv("HARBOR_DATA_DIR", "data"))
-        backup_dir = data_dir / "backups"
-        backup_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = Path(os.getenv("HARBOR_DATA_DIR", "data"))
+    backup_dir = data_dir / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Created backup directory: {backup_dir}")
+    logger.info(f"Backup directory ready: {backup_dir}")
+    return backup_dir
 
 
-async def initialize_database(force_recreate: bool = False) -> bool:
+async def initialize_database(force_recreate: bool = False) -> tuple[bool, str | None]:
     """
-    Initialize database with tables and initial data
+    Initialize database with tables and initial data.
 
     Args:
         force_recreate: If True, drop and recreate all tables
 
     Returns:
-        bool: True if initialization successful
+        Tuple of (success: bool, admin_password: Optional[str])
     """
+    admin_password = None
+
     try:
         logger.info("Starting database initialization...")
 
         # Get database engine
         engine = await get_engine()
 
-        # Check if database already exists and is healthy
+        # Check current database state
         if not force_recreate:
-            tables_exist = await check_database_health(engine)
-            if tables_exist:
-                logger.info("Database already initialized and healthy")
-                return True
+            healthy = await check_database_health(engine)
+            if healthy:
+                # Check if tables exist
+                async with engine.begin() as conn:
+                    if is_sqlite():
+                        result = await conn.execute(
+                            text(
+                                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'"
+                            )
+                        )
+                    else:
+                        result = await conn.execute(
+                            text(
+                                "SELECT COUNT(*) FROM information_schema.tables "
+                                "WHERE table_schema='public'"
+                            )
+                        )
+
+                    table_count = result.scalar() or 0
+
+                    if table_count > 0:
+                        logger.info(
+                            f"Database already initialized with {table_count} tables"
+                        )
+                        return True, None
 
         # Initialize SQLite settings if needed
         await initialize_sqlite_settings(engine)
 
         # Drop tables if force recreate
         if force_recreate:
-            async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.drop_all)
-            logger.info("Dropped existing database tables")
+            await drop_tables(engine)
 
         # Create tables
         await create_tables(engine)
 
         # Seed initial data
-        await seed_initial_data()
+        admin_password = await seed_initial_data()
 
         # Create backup directory for home lab
-        await create_backup_directory()
+        if get_settings().deployment_profile == DeploymentProfile.HOMELAB:
+            await create_backup_directory()
 
         # Final health check
         healthy = await check_database_health(engine)
 
         if healthy:
             logger.info("Database initialization completed successfully")
+            if admin_password:
+                logger.info("=" * 60)
+                logger.info("IMPORTANT: Save these credentials!")
+                logger.info("Admin Username: admin")
+                logger.info(f"Admin Password: {admin_password}")
+                logger.info("=" * 60)
         else:
             logger.error("Database initialization failed health check")
 
-        return healthy
+        return healthy, admin_password
 
     except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
-        return False
+        logger.error(f"Database initialization failed: {e}", exc_info=True)
+        return False, None
 
 
-async def reset_database() -> bool:
-    """Reset database - drop all tables and recreate (DANGEROUS!)"""
+async def reset_database() -> tuple[bool, str | None]:
+    """
+    Reset database - drop all tables and recreate (DANGEROUS!).
+
+    Returns:
+        Tuple of (success: bool, admin_password: Optional[str])
+    """
+    settings = get_settings()
+
+    if settings.deployment_profile == DeploymentProfile.PRODUCTION:
+        logger.error("Cannot reset production database!")
+        raise ValueError("Cannot reset production database!")
+
     logger.warning("Resetting database - all data will be lost!")
 
-    success = await initialize_database(force_recreate=True)
+    success, admin_password = await initialize_database(force_recreate=True)
 
     if success:
         logger.warning("Database reset completed")
     else:
         logger.error("Database reset failed")
 
+    return success, admin_password
+
+
+# Convenience functions
+async def ensure_database_ready() -> bool:
+    """
+    Ensure database is ready for use (called during app startup).
+
+    Returns:
+        True if database is ready
+    """
+    success, _ = await initialize_database(force_recreate=False)
     return success
 
 
-# Convenience functions for common operations
-async def ensure_database_ready() -> bool:
-    """Ensure database is ready for use (called during app startup)"""
-    return await initialize_database(force_recreate=False)
-
-
 async def get_database_info() -> dict[str, Any]:
-    """Get database information and statistics."""
+    """
+    Get database information and statistics.
+
+    Returns:
+        Dictionary containing database information
+    """
     try:
-        session_manager = get_session_manager()
+        engine = await get_engine()
 
-        async with session_manager.session() as session:
-            # Get database dialect
-            dialect = session.bind.dialect.name if session.bind else "unknown"
-
-            # Count tables
-            if dialect == "sqlite":
-                result = await session.execute(
-                    text("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
-                )
-                table_count = result.scalar() or 0
-
-                # Get database size for SQLite
-                # Check if bind is an AsyncEngine (has url attribute)
-                size_mb = None
-                if session.bind and isinstance(session.bind, AsyncEngine):
-                    db_path = session.bind.url.database
-                    if db_path and os.path.exists(db_path):
-                        size_bytes = os.path.getsize(db_path)
-                        size_mb = round(size_bytes / (1024 * 1024), 2)
-
-            else:  # PostgreSQL
-                result = await session.execute(
-                    text(
-                        "SELECT COUNT(*) FROM information_schema.tables "
-                        "WHERE table_schema = 'public'"
-                    )
-                )
-                table_count = result.scalar() or 0
-
-                # Get database size for PostgreSQL
-                result = await session.execute(
-                    text("SELECT pg_database_size(current_database())")
-                )
-                size_bytes = result.scalar() or 0
-                size_mb = round(size_bytes / (1024 * 1024), 2)
-
-            return {
-                "dialect": dialect,
-                "table_count": table_count,
-                "size_mb": size_mb,
+        async with engine.begin() as conn:
+            # Get basic info with explicit typing
+            info: dict[str, Any] = {
+                "dialect": engine.dialect.name,
+                "driver": engine.dialect.driver,
+                "server_version": None,
+                "table_count": 0,
+                "size_mb": None,
                 "status": "connected",
             }
 
+            # Get table count and size based on database type
+            if is_sqlite():
+                # Table count
+                result = await conn.execute(
+                    text("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
+                )
+                info["table_count"] = result.scalar() or 0
+
+                # Database file size
+                if engine.url.database and os.path.exists(engine.url.database):
+                    size_bytes = os.path.getsize(engine.url.database)
+                    info["size_mb"] = round(size_bytes / (1024 * 1024), 2)
+
+                # SQLite version
+                result = await conn.execute(text("SELECT sqlite_version()"))
+                info["server_version"] = result.scalar()
+
+            else:  # PostgreSQL
+                # Table count
+                result = await conn.execute(
+                    text(
+                        "SELECT COUNT(*) FROM information_schema.tables "
+                        "WHERE table_schema='public'"
+                    )
+                )
+                info["table_count"] = result.scalar() or 0
+
+                # Database size
+                result = await conn.execute(
+                    text("SELECT pg_database_size(current_database())")
+                )
+                size_bytes = result.scalar() or 0
+                info["size_mb"] = round(size_bytes / (1024 * 1024), 2)
+
+                # PostgreSQL version
+                result = await conn.execute(text("SELECT version()"))
+                version_str = result.scalar()
+                if version_str:
+                    # Extract version number from string
+                    import re
+
+                    match = re.search(r"PostgreSQL (\d+\.\d+)", version_str)
+                    if match:
+                        info["server_version"] = match.group(1)
+
+            return info
+
     except Exception as e:
-        logger.error(f"Failed to get database info: {e}", exc_info=True)
-        # Return generic error message without exposing exception details
-        return {"error": "Unable to retrieve database information"}
+        logger.error(f"Failed to get database info: {e}")
+        return {"error": "Unable to retrieve database information", "status": "error"}
+
+
+__all__ = [
+    "check_database_health",
+    "create_tables",
+    "drop_tables",
+    "ensure_database_ready",
+    "get_database_info",
+    "initialize_database",
+    "reset_database",
+    "seed_initial_data",
+]
