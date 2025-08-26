@@ -1,3 +1,4 @@
+---
 # Harbor Container Updater - Development Configuration
 # Optimized for development workflow with debugging and feature testing
 # Following Harbor architecture design principles
@@ -7,7 +8,7 @@
 # =============================================================================
 deployment:
   profile: development
-  description: "Development environment with debugging and feature testing"
+  description: Development environment with debugging and feature testing
   auto_setup: true # Enable auto-setup for quick development
   show_welcome: true # Show welcome for testing UI
 
@@ -15,9 +16,9 @@ deployment:
 # Application Settings
 # =============================================================================
 app:
-  name: "Harbor Container Updater (Development)"
+  name: Harbor Container Updater (Development)
   debug: true # Enable debug mode
-  host: "0.0.0.0"
+  host: 0.0.0.0
   port: 8080
 
 # =============================================================================
@@ -34,7 +35,7 @@ database:
   # Development backup settings
   backup_enabled: true
   backup_retention_days: 3 # Shorter retention for dev
-  backup_schedule: "0 3 * * *" # Daily at 3 AM
+  backup_schedule: 0 3 * * *   # Daily at 3 AM
 
 # =============================================================================
 # Security Settings (Relaxed for development)
@@ -63,8 +64,8 @@ security:
 updates:
   # Scheduling (frequent for testing)
   default_check_interval_seconds: 300 # Every 5 minutes
-  default_update_time: "now" # Allow immediate updates
-  default_timezone: "UTC"
+  default_update_time: now # Allow immediate updates
+  default_timezone: UTC
 
   # Concurrency (moderate)
   max_concurrent_updates: 3 # Moderate concurrency
@@ -85,7 +86,7 @@ updates:
 # =============================================================================
 docker:
   # Connection (direct socket for development)
-  host: "unix:///var/run/docker.sock" # Direct access for dev
+  host: unix:///var/run/docker.sock   # Direct access for dev
   timeout: 30 # Shorter timeout
 
   # Discovery (frequent for development)
@@ -94,8 +95,8 @@ docker:
 
   # Development safety patterns (minimal exclusions)
   exclude_patterns:
-    - "harbor*" # Harbor itself
-    - "*_test" # Test containers
+  - harbor*   # Harbor itself
+  - '*_test'   # Test containers
 
 # =============================================================================
 # Registry Settings (Development optimized)
@@ -213,27 +214,28 @@ test_containers:
   create_test_containers: true # Auto-create test containers
 
   # Test container specifications
-  test_containers:
-    - name: "nginx-test"
-      image: "nginx:alpine"
-      ports: ["8081:80"]
-      labels:
-        harbor.enable: "true"
-        harbor.test: "true"
+  containers:  # Changed from test_containers to containers to avoid duplication
+  - name: nginx-test
+    image: nginx:alpine
+    ports:
+    - 8081:80
+    labels:
+      harbor.enable: 'true'
+      harbor.test: 'true'
 
-    - name: "redis-test"
-      image: "redis:alpine"
-      labels:
-        harbor.enable: "true"
-        harbor.test: "true"
+  - name: redis-test
+    image: redis:alpine
+    labels:
+      harbor.enable: 'true'
+      harbor.test: 'true'
 
-    - name: "busybox-test"
-      image: "busybox:latest"
-      command: ["sleep", "3600"]
-      labels:
-        harbor.enable: "true"
-        harbor.test: "true"
-        harbor.policy.update_time: "immediate"
+  - name: busybox-test
+    image: busybox:latest
+    command: [sleep, '3600']
+    labels:
+      harbor.enable: 'true'
+      harbor.test: 'true'
+      harbor.policy.update_time: immediate
 
 # =============================================================================
 # Development Database Seeding
@@ -242,33 +244,33 @@ seed_data:
   # Create development users
   create_dev_users: true
   dev_users:
-    - username: "admin"
-      password: "dev_admin_123" # pragma: allowlist secret
-      is_admin: true
-      display_name: "Development Admin"
+  - username: admin
+    password: dev_admin_123   # pragma: allowlist secret
+    is_admin: true
+    display_name: Development Admin
 
-    - username: "dev"
-      password: "dev_user_123" # pragma: allowlist secret
-      is_admin: false
-      display_name: "Development User"
+  - username: dev
+    password: dev_user_123   # pragma: allowlist secret
+    is_admin: false
+    display_name: Development User
 
   # Create test API keys
   create_test_api_keys: true
   test_api_keys:
-    - name: "development-testing"
-      description: "Development and testing key"
-      scopes: ["admin"]
+  - name: development-testing
+    description: Development and testing key
+    scopes: [admin]
 
   # Create sample policies
   create_sample_policies: true
   sample_policies:
-    - container_pattern: "*test*"
-      auto_update_enabled: false # Don't auto-update test containers
-      check_interval_seconds: 300 # Check every 5 minutes
+  - container_pattern: '*test*'
+    auto_update_enabled: false   # Don't auto-update test containers
+    check_interval_seconds: 300   # Check every 5 minutes
 
-    - container_pattern: "nginx*"
-      update_time: "immediate" # Update immediately for testing
-      health_check_timeout_seconds: 15 # Quick health checks
+  - container_pattern: nginx*
+    update_time: immediate   # Update immediately for testing
+    health_check_timeout_seconds: 15   # Quick health checks
 
 # =============================================================================
 # Mock Services (For testing without external dependencies)
@@ -328,8 +330,8 @@ ide:
 # =============================================================================
 hot_reload:
   # File watching
-  watch_directories: ["app/", "config/", "templates/"]
-  watch_extensions: [".py", ".yaml", ".html", ".css", ".js"]
+  watch_directories: [app/, config/, templates/]
+  watch_extensions: [.py, .yaml, .html, .css, .js]
 
   # Reload behavior
   auto_restart_on_change: true # Restart on code changes
@@ -348,9 +350,9 @@ environment_detection:
 
   # Development indicators
   dev_indicators:
-    - "PYCHARM_HOSTED" # PyCharm environment
-    - "VSCODE_CWD" # VS Code environment
-    - "JUPYTER_SERVER_ROOT" # Jupyter environment
+  - PYCHARM_HOSTED   # PyCharm environment
+  - VSCODE_CWD   # VS Code environment
+  - JUPYTER_SERVER_ROOT   # Jupyter environment
 
   # Auto-apply dev settings
   auto_apply_dev_settings: true # Apply dev-specific settings
@@ -377,10 +379,10 @@ experimental:
 # Documentation and Help
 # =============================================================================
 help:
-  documentation_url: "https://harbor-docs.dev/development"
-  api_documentation: "http://localhost:8080/docs"
-  development_guide: "https://harbor-docs.dev/development/setup"
-  troubleshooting: "https://harbor-docs.dev/development/debugging"
+  documentation_url: https://harbor-docs.dev/development
+  api_documentation: http://localhost:8080/docs
+  development_guide: https://harbor-docs.dev/development/setup
+  troubleshooting: https://harbor-docs.dev/development/debugging
 
   # Development help
   show_tooltips: true # Show helpful tooltips
@@ -412,7 +414,7 @@ workflow:
 # =============================================================================
 # Version and Compatibility
 # =============================================================================
-config_version: "1.0" # Configuration schema version
-compatible_harbor_versions: ["0.1.0+"] # Compatible Harbor versions
-last_updated: "2024-01-15" # Configuration last updated
+config_version: '1.0' # Configuration schema version
+compatible_harbor_versions: [0.1.0+]   # Compatible Harbor versions
+last_updated: '2024-01-15' # Configuration last updated
 development_features_enabled: true # Enable development-specific features
