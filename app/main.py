@@ -465,13 +465,21 @@ def create_app() -> FastAPI:
                     },
                 }
 
-                logger.info(f"Database info: {db_info}")
+                # Log database info for debugging (server-side only)
+                logger.info(
+                    "Database status retrieved successfully", extra={"db_info": db_info}
+                )
                 return status_data
 
-            except Exception as e:
-                logger.error(f"Database status error: {e}", exc_info=True)
-                # Don't expose exception details
-                return {"status": "error", "milestone": "M0"}
+            except Exception:  # Don't capture exception variable
+                # Log full error details server-side with stack trace
+                logger.error("Database status error occurred", exc_info=True)
+                # Return generic error without any exception details
+                return {
+                    "status": "error",
+                    "milestone": "M0",
+                    "message": "Unable to retrieve database status",
+                }
 
         @app.get("/database/health")
         async def database_health() -> dict[str, Any]:
