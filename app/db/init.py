@@ -17,7 +17,7 @@ from app.config import DeploymentProfile, get_settings
 from app.db.base import Base
 from app.db.config import get_engine
 from app.db.models.settings import SystemSettings
-from app.db.session import get_async_session
+from app.db.session import get_async_session, get_session_manager
 from app.utils.logging import get_logger
 
 
@@ -226,39 +226,54 @@ async def ensure_database_ready() -> bool:
 
 
 async def get_database_info() -> dict[str, Any]:
-    """Get database information for debugging/status"""
+    """Get database information and statistics."""
     try:
-        engine = await get_engine()
+        session_manager = get_session_manager()
 
-        info: dict[str, Any] = {
-            "url": str(engine.url).split("://", 1)[0] + "://***",  # Hide credentials
-            "dialect": engine.dialect.name,
-            "driver": engine.dialect.driver,
-        }
+        async with session_manager.session() as session:
+            # Get database dialect
+            dialect = session.bind.dialect.name if session.bind else "unknown"
 
-        # Get table count
-        async with engine.begin() as conn:
-            if str(engine.url).startswith("sqlite"):
-                result = await conn.execute(
+            # Count tables
+            if dialect == "sqlite":
+                result = await session.execute(
                     text("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
                 )
-            else:
-                result = await conn.execute(
-                    text("SELECT COUNT(*) FROM information_schema.tables")
+                table_count = result.scalar() or 0
+
+                # Get database size for SQLite
+                # Check if bind is an AsyncEngine (has url attribute)
+                size_mb = None
+                if session.bind and isinstance(session.bind, AsyncEngine):
+                    db_path = session.bind.url.database
+                    if db_path and os.path.exists(db_path):
+                        size_bytes = os.path.getsize(db_path)
+                        size_mb = round(size_bytes / (1024 * 1024), 2)
+
+            else:  # PostgreSQL
+                result = await session.execute(
+                    text(
+                        "SELECT COUNT(*) FROM information_schema.tables "
+                        "WHERE table_schema = 'public'"
+                    )
                 )
+                table_count = result.scalar() or 0
 
-            info["table_count"] = result.scalar()
+                # Get database size for PostgreSQL
+                result = await session.execute(
+                    text("SELECT pg_database_size(current_database())")
+                )
+                size_bytes = result.scalar() or 0
+                size_mb = round(size_bytes / (1024 * 1024), 2)
 
-        # Get database size (SQLite only)
-        if str(engine.url).startswith("sqlite"):
-            db_path = str(engine.url).split(":///", 1)[1]
-            if Path(db_path).exists():
-                size_bytes = Path(db_path).stat().st_size
-                size_mb: float = round(size_bytes / (1024 * 1024), 2)
-                info["size_mb"] = size_mb  # Explicitly typed as float
-
-        return info
+            return {
+                "dialect": dialect,
+                "table_count": table_count,
+                "size_mb": size_mb,
+                "status": "connected",
+            }
 
     except Exception as e:
-        logger.error(f"Failed to get database info: {e}")
-        return {"error": str(e)}
+        logger.error(f"Failed to get database info: {e}", exc_info=True)
+        # Return generic error message without exposing exception details
+        return {"error": "Unable to retrieve database information"}

@@ -443,6 +443,15 @@ def create_app() -> FastAPI:
             try:
                 db_info = await get_database_info()
 
+                # Check if there was an error getting database info
+                if "error" in db_info:
+                    logger.warning("Database info retrieval failed")
+                    return {
+                        "status": "error",
+                        "milestone": "M0",
+                        "message": db_info.get("error", "Database status unavailable"),
+                    }
+
                 status_data = {
                     "status": "connected",
                     "info": db_info,
@@ -465,16 +474,11 @@ def create_app() -> FastAPI:
                     },
                 }
 
-                # Log database info for debugging (server-side only)
-                logger.info(
-                    "Database status retrieved successfully", extra={"db_info": db_info}
-                )
+                logger.info("Database status retrieved successfully")
                 return status_data
 
-            except Exception:  # Don't capture exception variable
-                # Log full error details server-side with stack trace
-                logger.error("Database status error occurred", exc_info=True)
-                # Return generic error without any exception details
+            except Exception:
+                logger.error("Database status endpoint error", exc_info=True)
                 return {
                     "status": "error",
                     "milestone": "M0",
