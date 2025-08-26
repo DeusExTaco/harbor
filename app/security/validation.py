@@ -22,7 +22,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class SecurityValidationError(Exception):
@@ -329,11 +329,13 @@ class ContainerIdentifier(BaseModel):
     uid: str = Field(..., min_length=1, max_length=36)
     name: str = Field(..., min_length=1, max_length=255)
 
-    @validator("name")
+    @field_validator("name")
+    @classmethod
     def validate_container_name(cls, v: str) -> str:
         return InputSanitizer.sanitize_container_name(v)
 
-    @validator("uid")
+    @field_validator("uid")
+    @classmethod
     def validate_uid_format(cls, v: str) -> str:
         # Basic UUID format validation
         if not re.match(r"^[0-9a-f-]{36}$", v.lower()):
@@ -346,7 +348,8 @@ class ImageReference(BaseModel):
 
     reference: str = Field(..., min_length=1, max_length=1000)
 
-    @validator("reference")
+    @field_validator("reference")
+    @classmethod
     def validate_image_reference(cls, v: str) -> str:
         return InputSanitizer.sanitize_image_reference(v)
 
@@ -363,7 +366,8 @@ class URLReference(BaseModel):
 
     url: str = Field(..., max_length=2000)
 
-    @validator("url")
+    @field_validator("url")
+    @classmethod
     def validate_url(cls, v: str) -> str:
         return InputSanitizer.sanitize_url(v)
 

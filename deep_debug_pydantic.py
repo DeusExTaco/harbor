@@ -75,7 +75,8 @@ def debug_pydantic_sources():
                     # Let's see what env_settings actually contains
                     try:
                         # This is a hack to peek into env_settings
-                        env_data = {}
+                        env_data = os.environ.copy()
+                        print(f"Environment variables count: {len(env_data)}")
                         if callable(env_settings):
                             # Try to call it and see what we get
                             env_result = env_settings()
@@ -274,8 +275,8 @@ def test_different_pydantic_approaches():
                 if env_profile and "deployment_profile" not in data:
                     try:
                         data["deployment_profile"] = TestProfile(env_profile)
-                    except ValueError:
-                        pass
+                    except Exception:
+                        pass  # Silently ignore to continue processing other fields
 
                 super().__init__(**data)
 

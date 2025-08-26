@@ -1,10 +1,12 @@
 # app/db/models/container.py
 """
-Harbor Container Model - FIXED TYPE ANNOTATIONS
+Harbor Container Model
 
 Container discovery and management model with SQLite-compatible constraints
 and comprehensive state tracking for automatic updates.
 """
+
+from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -193,8 +195,9 @@ class Container(BaseModel):
         ),
     )
 
-    policy: Mapped["ContainerPolicy | None"] = relationship(
-        "ContainerPolicy",  # String reference
+    # Relationships - Use string reference with proper typing
+    policy: Mapped[ContainerPolicy | None] = relationship(
+        "ContainerPolicy",  # String reference for SQLAlchemy
         back_populates="container",
         uselist=False,
         cascade="all, delete-orphan",

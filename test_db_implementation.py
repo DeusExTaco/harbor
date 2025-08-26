@@ -659,9 +659,6 @@ async def test_error_handling():
                 # Force an error - this should trigger session rollback
                 raise Exception("Forced error for testing rollback")
 
-                # This commit should never happen
-                await session.commit()
-
         except Exception as e:
             if "Forced error" in str(e):
                 rollback_worked = True

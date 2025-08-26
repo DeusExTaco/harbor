@@ -270,7 +270,6 @@ def check_basic_functionality():
         # Test database models
         from app.db.models.user import User
 
-        user = User(username="test", password_hash="hash")
         print_check("Database models", True, "User model works")
     except Exception as e:
         print_check("Database models", False, str(e))

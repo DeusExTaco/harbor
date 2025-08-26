@@ -1,9 +1,11 @@
-# app/db/models/user.py
+## app/db/models/user.py
 """
-Harbor User Model - FIXED WITH api_keys RELATIONSHIP
+Harbor User Model
 
 User model for authentication and authorization with proper relationship definitions.
 """
+
+from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
@@ -120,9 +122,9 @@ class User(BaseModel):
         doc="JSON user preferences object",
     )
 
-    # Relationships
-    api_keys: Mapped[list["APIKey"]] = relationship(
-        "APIKey",  # String reference
+    # Relationships - Use forward reference (string in quotes)
+    api_keys: Mapped[list[APIKey]] = relationship(
+        "APIKey",  # String reference for SQLAlchemy
         back_populates="created_by",
         cascade="all, delete-orphan",
         lazy="select",

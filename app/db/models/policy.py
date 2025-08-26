@@ -4,8 +4,9 @@ Harbor Container Policy Model
 
 Container-specific update policies and configuration.
 Inherits from global defaults with per-container overrides.
-
 """
+
+from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -133,17 +134,14 @@ class ContainerPolicy(BaseModel):
         Integer, ForeignKey("users.id"), nullable=True
     )
 
-    # Relationships - FIXED: Import models at top
-    from app.db.models.container import Container
-    from app.db.models.user import User
-
-    container: Mapped["Container"] = relationship(
-        "Container",  # String reference
+    # Relationships
+    container: Mapped[Container] = relationship(
+        "Container",  # String reference for SQLAlchemy
         back_populates="policy",
     )
 
-    created_by_user: Mapped["User | None"] = relationship(
-        "User",  # String reference
+    created_by_user: Mapped[User | None] = relationship(
+        "User",  # String reference for SQLAlchemy
         foreign_keys=[created_by_user_id],
     )
 
@@ -252,7 +250,7 @@ class ContainerPolicy(BaseModel):
         return result
 
     @classmethod
-    def create_default_policy(cls, container_uid: str) -> "ContainerPolicy":
+    def create_default_policy(cls, container_uid: str) -> ContainerPolicy:
         """Create a default policy for a container"""
         return cls(
             container_uid=container_uid,

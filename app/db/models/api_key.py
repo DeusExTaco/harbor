@@ -1,9 +1,11 @@
 # app/db/models/api_key.py
 """
-Harbor API Key Model - FIXED TYPE ANNOTATIONS
+Harbor API Key Model
 
 API key model for programmatic access with proper typing.
 """
+
+from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -106,9 +108,9 @@ class APIKey(BaseModel):
         doc="Rate limit per hour",
     )
 
-    # Relationships
-    created_by: Mapped["User"] = relationship(
-        "User",  # String reference to avoid import
+    # Relationships - Use forward reference (string in quotes)
+    created_by: Mapped[User] = relationship(
+        "User",  # String reference for SQLAlchemy
         back_populates="api_keys",
         lazy="select",
     )
