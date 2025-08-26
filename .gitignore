@@ -196,3 +196,7 @@ Desktop.ini
 # =============================================================================
 docs/_build/
 site/
+
+# Development scripts - track shell scripts but ignore Python test files
+scripts/dev/*.py
+!scripts/dev/*.sh
