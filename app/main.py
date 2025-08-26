@@ -91,7 +91,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
         app: FastAPI application instance
     """
     # Startup tasks
-    print(f"🛳️ Starting Harbor Container Updater v{__version__}")
+    print(f"🚢 Starting Harbor Container Updater v{__version__}")
     print(f"🎯 Milestone: {__milestone__} ({__status__})")
 
     startup_success = True
@@ -465,10 +465,12 @@ def create_app() -> FastAPI:
                     },
                 }
 
+                logger.info(f"Database info: {db_info}")
                 return status_data
 
             except Exception as e:
-                logger.error(f"Database status error: {e}")
+                logger.error(f"Database status error: {e}", exc_info=True)
+                # Don't expose exception details
                 return {"status": "error", "milestone": "M0"}
 
         @app.get("/database/health")
@@ -501,7 +503,8 @@ def create_app() -> FastAPI:
                     }
 
             except Exception as e:
-                logger.error(f"Database health check error: {e}")
+                logger.error(f"Database health check error: {e}", exc_info=True)
+                # Don't expose exception details
                 return {
                     "status": "unhealthy",
                     "connection": "error",
@@ -552,6 +555,7 @@ def create_app() -> FastAPI:
                     "debug_mode": config_summary["debug"],
                 }
             except Exception:
+                logger.error("Error getting config summary", exc_info=True)
                 root_data["configuration"] = {"status": "error"}
 
         return root_data
@@ -609,8 +613,8 @@ def create_app() -> FastAPI:
                     }
                 )
             except Exception:
+                logger.error("Error getting settings for version info", exc_info=True)
                 # Silently ignore config errors - version endpoint should always work
-                # even if configuration is broken. Version info is considered public.
                 pass
 
         return version_data
@@ -663,10 +667,14 @@ def create_app() -> FastAPI:
                         "frame_options": headers.get("X-Frame-Options"),
                     }
                 except ImportError:
-                    pass
+                    # Security headers module is optional - endpoint should still work without it
+                    # Headers info will simply be omitted from the response
+                    logger.debug(
+                        "Security headers module not available - skipping headers info"
+                    )
 
             except Exception as e:
-                logger.error(f"Security status config error: {e}")
+                logger.error(f"Security status config error: {e}", exc_info=True)
                 security_data["configuration_error"] = "configuration unavailable"
 
         return security_data
@@ -710,14 +718,15 @@ def create_app() -> FastAPI:
 
                         db_info = asyncio.run(get_database_info())
                         config_summary["database"] = db_info
-                    except Exception as e:
-                        logger.error(f"Config database info error: {e}")
+                    except Exception:
+                        logger.error("Config database info error", exc_info=True)
                         # Don't expose internal error details
                         config_summary["database_status"] = "unavailable"
 
                 return config_summary
-            except Exception as e:
-                logger.error(f"Config info error: {e}")
+            except Exception:
+                logger.error("Config info error", exc_info=True)
+                # Don't expose exception details
                 return {"error": "Configuration information unavailable"}
 
     # Development endpoints for database testing
@@ -753,9 +762,9 @@ def create_app() -> FastAPI:
                 results["status"] = "ok"
                 return results
 
-            except Exception as e:
-                logger.error(f"Database test failed: {e}", exc_info=True)
-                # Even in debug mode, don't expose internals
+            except Exception:
+                logger.error("Database test failed", exc_info=True)
+                # Don't expose exception details even in debug mode
                 return {
                     "status": "error",
                     "message": "Database test failed",
@@ -796,9 +805,9 @@ def create_app() -> FastAPI:
                     "middleware_active": True,
                 }
 
-            except Exception as e:
-                logger.error(f"Security test failed: {e}", exc_info=True)
-                # Even in debug mode, don't expose internals
+            except Exception:
+                logger.error("Security test failed", exc_info=True)
+                # Don't expose exception details even in debug mode
                 return {
                     "status": "error",
                     "message": "Security test failed",
@@ -814,7 +823,7 @@ def main() -> None:
     TODO: Implement CLI interface in later milestones.
     Currently shows Harbor information and M0 progress.
     """
-    print(f"🛳️ Harbor Container Updater v{__version__}")
+    print(f"🚢 Harbor Container Updater v{__version__}")
     print(f"🎯 Status: {__status__} ({__milestone__} Milestone)")
     print(f"📖 Description: {__description__}")
     print()

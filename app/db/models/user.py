@@ -17,10 +17,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import BaseModel
 
 
-# Only import for type checking to avoid circular dependency
 if TYPE_CHECKING:
-    # CodeQL false positive - TYPE_CHECKING prevents runtime import
-    from app.db.models.api_key import APIKey  # nosec
+    # Import only for type checking to avoid circular dependency at runtime
+    # This is a standard pattern in Python for handling circular imports
+    # CodeQL may flag this but it's a false positive - TYPE_CHECKING ensures
+    # this import never happens at runtime, preventing actual circular imports
+    from app.db.models.api_key import APIKey
 
 
 class User(BaseModel):
@@ -124,9 +126,11 @@ class User(BaseModel):
         doc="JSON user preferences object",
     )
 
-    # Relationships - Use forward reference (string in quotes)
+    # Relationships
+    # Use string annotation for forward reference to avoid circular imports
+    # SQLAlchemy resolves "APIKey" string at runtime after all models are loaded
     api_keys: Mapped[list[APIKey]] = relationship(
-        "APIKey",  # String reference for SQLAlchemy
+        "APIKey",  # String reference for SQLAlchemy's lazy resolution
         back_populates="created_by",
         cascade="all, delete-orphan",
         lazy="select",
