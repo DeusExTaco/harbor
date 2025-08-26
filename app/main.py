@@ -316,8 +316,8 @@ def create_app() -> FastAPI:
                             },
                         }
                     )
-                except Exception as config_err:
-                    logger.error(f"Config error in health check: {config_err}")
+                except Exception:  # Don't capture exception variable
+                    logger.error("Config error in health check", exc_info=True)
                     health_data["config_status"] = "error"
 
             # Add database health if available
@@ -333,8 +333,8 @@ def create_app() -> FastAPI:
                     if "size_mb" in db_info:
                         health_data["database"]["size_mb"] = db_info["size_mb"]
 
-                except Exception as db_err:
-                    logger.error(f"Database health check error: {db_err}")
+                except Exception:  # Don't capture exception variable
+                    logger.error("Database health check error", exc_info=True)
                     # Don't expose database error details
                     health_data["database"] = {"status": "error"}
                     health_data["status"] = "degraded"
@@ -346,10 +346,10 @@ def create_app() -> FastAPI:
 
             return health_data
 
-        except Exception as e:
-            logger.error(f"Health check failed: {e}", exc_info=True)
+        except Exception:  # Don't capture exception variable to avoid any exposure risk
+            logger.error("Health check failed", exc_info=True)
 
-            # Never expose exception details - return minimal info
+            # Return absolute minimum information
             return {
                 "status": "unhealthy",
                 "version": __version__,
@@ -609,7 +609,9 @@ def create_app() -> FastAPI:
                     }
                 )
             except Exception:
-                pass  # Silent failure acceptable - version info is non-critical
+                # Silently ignore config errors - version endpoint should always work
+                # even if configuration is broken. Version info is considered public.
+                pass
 
         return version_data
 

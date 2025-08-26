@@ -19,7 +19,8 @@ from app.db.base import BaseModel
 
 # Only import for type checking to avoid circular dependency
 if TYPE_CHECKING:
-    from app.db.models.api_key import APIKey
+    # CodeQL false positive - TYPE_CHECKING prevents runtime import
+    from app.db.models.api_key import APIKey  # nosec
 
 
 class User(BaseModel):
