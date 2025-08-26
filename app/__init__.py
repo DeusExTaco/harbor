@@ -28,3 +28,68 @@ __profiles__ = ["homelab", "development", "staging", "production"]
 # Development milestone (M0 = Foundation)
 __milestone__ = "M0"
 __status__ = "Pre-Alpha"
+
+# Import key components for easy access
+try:
+    from app.config import (
+        DeploymentProfile,
+        get_config_summary,
+        get_settings,
+        is_development,
+        is_homelab,
+        is_production,
+    )
+
+    CONFIG_AVAILABLE = True
+except ImportError:
+    CONFIG_AVAILABLE = False
+    # Don't try to define DeploymentProfile at all - just leave it undefined
+    get_settings = lambda: None
+    get_config_summary = lambda: None
+    is_development = lambda: False
+    is_production = lambda: False
+    is_homelab = lambda: True
+
+# Export public API
+__all__ = [
+    "CONFIG_AVAILABLE",
+    "__author__",
+    "__description__",
+    "__features__",
+    "__license__",
+    "__milestone__",
+    "__profiles__",
+    "__status__",
+    "__version__",
+    "get_config_summary",
+    "get_settings",
+    "is_development",
+    "is_homelab",
+    "is_production",
+]
+
+# Only add DeploymentProfile to exports if config is available
+if CONFIG_AVAILABLE:
+    __all__.insert(1, "DeploymentProfile")  # Insert after CONFIG_AVAILABLE
+
+
+def get_version() -> str:
+    """Get the Harbor version string."""
+    return __version__
+
+
+def get_app_info() -> dict:
+    """Get application information."""
+    return {
+        "name": "Harbor Container Updater",
+        "version": __version__,
+        "author": __author__,
+        "license": __license__,
+        "description": __description__,
+        "milestone": __milestone__,
+        "status": __status__,
+        "features": __features__,
+        "profiles": __profiles__,
+        "project_url": "https://github.com/DeusExTaco/harbor",
+        "docs_url": "https://harbor-docs.dev",
+    }

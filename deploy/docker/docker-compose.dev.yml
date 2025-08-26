@@ -3,8 +3,6 @@
 # Located: deploy/docker/docker-compose.dev.yml
 # Complete development environment with hot reload, debugging, and services
 
-version: '3.8'
-
 services:
   # =============================================================================
   # Harbor Development Application
