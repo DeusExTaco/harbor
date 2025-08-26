@@ -86,3 +86,18 @@ yarn.lock
 pnpm-lock.yaml
 .idea/
 idea/
+
+# Development test files in root
+/test_*.py
+/debug_*.py
+/*_test.py
+/simple_*.py
+/validate_*.py
+/check_*.py
+/tmp_*.py
+/temp_*.py
+
+# Scratch files
+/scratch.py
+/playground.py
+/experiment*.py
