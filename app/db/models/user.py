@@ -1,4 +1,4 @@
-## app/db/models/user.py
+# app/db/models/user.py
 """
 Harbor User Model
 
@@ -17,6 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import BaseModel
 
 
+# Only import for type checking to avoid circular dependency
 if TYPE_CHECKING:
     from app.db.models.api_key import APIKey
 

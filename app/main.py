@@ -349,7 +349,7 @@ def create_app() -> FastAPI:
         except Exception as e:
             logger.error(f"Health check failed: {e}", exc_info=True)
 
-            # Never expose exception details
+            # Never expose exception details - return minimal info
             return {
                 "status": "unhealthy",
                 "version": __version__,
@@ -609,8 +609,7 @@ def create_app() -> FastAPI:
                     }
                 )
             except Exception:
-                # Silent failure for version info
-                pass
+                pass  # Silent failure acceptable - version info is non-critical
 
         return version_data
 
@@ -754,12 +753,10 @@ def create_app() -> FastAPI:
 
             except Exception as e:
                 logger.error(f"Database test failed: {e}", exc_info=True)
-                # Structure error response properly for test endpoint
+                # Even in debug mode, don't expose internals
                 return {
                     "status": "error",
                     "message": "Database test failed",
-                    # Only include details in explicit debug endpoint
-                    "debug_info": str(e)[:100] if debug_mode else None,  # Limit length
                 }
 
     # Security testing endpoint (development only)
@@ -799,12 +796,10 @@ def create_app() -> FastAPI:
 
             except Exception as e:
                 logger.error(f"Security test failed: {e}", exc_info=True)
-                # Structure error response properly for test endpoint
+                # Even in debug mode, don't expose internals
                 return {
                     "status": "error",
                     "message": "Security test failed",
-                    # Only include limited debug info in explicit test endpoint
-                    "debug_info": str(e)[:100] if debug_mode else None,  # Limit length
                 }
 
     return app

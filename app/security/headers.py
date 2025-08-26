@@ -439,11 +439,11 @@ if __name__ == "__main__":
     print("🔐 Harbor Security Headers Middleware")
     print("=" * 40)
 
-    # FIX: Import DeploymentProfile when running as main
+    # Import DeploymentProfile when running as main
     from app.config import DeploymentProfile
 
-    # FIX: Properly iterate over enum members
-    for profile in DeploymentProfile:  # This iterates over the enum members
+    # Iterate over enum members correctly
+    for profile in list(DeploymentProfile):  # Convert to list explicitly
         print(f"\n{profile.value.title()} Profile Headers:")
         headers = get_security_headers_for_profile(profile)
 
