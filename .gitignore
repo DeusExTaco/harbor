@@ -46,7 +46,6 @@ logs/
 backups/
 cache/
 uploads/
-node_modules/
 harbor.db*
 
 # Testing
@@ -79,3 +78,9 @@ safety-report.json
 # Docker artifacts
 .docker/
 **/docker-compose.override.yml
+
+# Node modules (if prettier or other node tools are used)
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
