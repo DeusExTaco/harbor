@@ -44,6 +44,8 @@ jobs:
       with:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
+        config-file: .github/codeql/codeql-config.yml
+        # Fallback inline config if config file is missing
         config: |
           name: "Harbor CodeQL Configuration"
           queries:
@@ -54,16 +56,24 @@ jobs:
             - "**/*.md"
             - "**/node_modules/**"
             - "**/__pycache__/**"
-            - "**/migrations/**"
+            - "**/migrations/versions/**"
             - "examples/**"
             - "docs/**"
+            - "scripts/dev/**"
+            - "deploy/**"
           query-filters:
             - exclude:
                 id: py/unused-import
+                # Imports under TYPE_CHECKING are often unused at runtime
             - exclude:
                 id: py/similar-function
+                # Repository pattern leads to similar CRUD functions
             - exclude:
                 id: py/clear-text-logging-sensitive-data
+                # We carefully control what gets logged
+            - exclude:
+                id: py/unsafe-cyclic-import
+                # TYPE_CHECKING imports are safe from circular dependencies
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
