@@ -1,9 +1,19 @@
+# =============================================================================
 # Python
+# =============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+*.egg-info/
+*.egg
+MANIFEST
+.installed.cfg
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Distribution / packaging
 build/
 develop-eggs/
 dist/
@@ -17,64 +27,176 @@ sdist/
 var/
 wheels/
 share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
 
-# PyCharm
-.idea/workspace.xml
-.idea/tasks.xml
-.idea/usage.statistics.xml
-.idea/dictionaries
-.idea/shelf/
-
-# Virtual environments
+# =============================================================================
+# Virtual Environments
+# =============================================================================
 .venv/
 venv/
 ENV/
 env/
-
-# Environment variables
 .env
-.env.local
-.env.production
 
-# Harbor specific
-data/
-logs/
-backups/
-cache/
-uploads/
-harbor.db*
+# =============================================================================
+# IDE and Editors
+# =============================================================================
+# PyCharm
+.idea/
+*.iml
+*.iws
 
-# Testing
+# VS Code
+.vscode/
+*.code-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# =============================================================================
+# Environment and Configuration
+# =============================================================================
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Local configuration
+local_settings.py
+local.yaml
+local.yml
+
+# =============================================================================
+# Testing and Coverage
+# =============================================================================
 .coverage
+.coverage.*
 htmlcov/
 .pytest_cache/
 .tox/
 coverage.xml
+*.cover
+.hypothesis/
+nosetests.xml
 test.db*
+*_test.db
 integration_test.db*
 
-# Docker
-.dockerignore
+# =============================================================================
+# Development and Debug Files
+# =============================================================================
+# Root-level test/debug scripts
+/test_*.py
+/debug_*.py
+/*_test.py
+/simple_*.py
+/validate_*.py
+/check_*.py
+/tmp_*.py
+/temp_*.py
+/deep_*.py
+/scratch.py
+/playground.py
+/experiment*.py
 
-# OS
-.DS_Store
-Thumbs.db
+# Development scripts directory (if you want to keep some locally)
+scripts/dev/*
+!scripts/dev/.gitkeep
 
-# Temporary files
-*.tmp
-*.temp
-*.log
+# =============================================================================
+# Harbor Application Specific
+# =============================================================================
+# Runtime data
+data/
+!data/.gitkeep
+logs/
+!logs/.gitkeep
+backups/
+cache/
+uploads/
 
-# Security and analysis reports
-.bandit-report.json
+# Database files
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+harbor.db*
+
+# =============================================================================
+# Security and Reports
+# =============================================================================
+# Security scan reports
+*-report.json
+*.security-report
 bandit-report.json
 safety-report.json
-*.security-report
+trivy-results/
 
-# Docker artifacts
+# Secrets baseline (keep this)
+!.secrets.baseline
+
+# =============================================================================
+# Docker
+# =============================================================================
 .docker/
 **/docker-compose.override.yml
+!docker-compose.override.example.yml
+
+# =============================================================================
+# Node.js (if using any JS tools)
+# =============================================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.npm/
+
+# =============================================================================
+# OS Files
+# =============================================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+
+# Linux
+.directory
+.Trash-*
+
+# =============================================================================
+# Logs and Temporary Files
+# =============================================================================
+*.log
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+*.orig
+
+# =============================================================================
+# Jupyter Notebooks (if used)
+# =============================================================================
+.ipynb_checkpoints/
+*.ipynb
+
+# =============================================================================
+# Documentation Build Files
+# =============================================================================
+docs/_build/
+site/
+
+# Development scripts - track shell scripts but ignore Python test files
+scripts/dev/*.py
+!scripts/dev/*.sh

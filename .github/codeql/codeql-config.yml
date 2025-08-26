@@ -1,126 +1,127 @@
+---
 # Harbor CodeQL Configuration
 # This file configures CodeQL analysis to reduce false positives while maintaining security
 # Documentation: https://docs.github.com/en/code-security/code-scanning/automatically-scanning-your-code-for-vulnerabilities-and-errors
 
-name: "Harbor CodeQL Configuration"
+name: Harbor CodeQL Configuration
 
 # Query suites to run
 queries:
-  - uses: security-and-quality
-  - uses: security-extended
+- uses: security-and-quality
+- uses: security-extended
 
 # Paths to exclude from analysis
 paths-ignore:
   # Test fixtures and mock data
-  - "tests/fixtures/**"
-  - "tests/**/test_*.py"
-  - "**/conftest.py"
+- tests/fixtures/**
+- tests/**/test_*.py
+- '**/conftest.py'
 
   # Documentation and non-code files
-  - "**/*.md"
-  - "**/*.rst"
-  - "**/*.txt"
-  - "docs/**"
-  - "*.yml"
-  - "*.yaml"
-  - "LICENSE"
-  - "CHANGELOG*"
+- '**/*.md'
+- '**/*.rst'
+- '**/*.txt'
+- docs/**
+- '*.yml'
+- '*.yaml'
+- LICENSE
+- CHANGELOG*
 
   # Dependencies and generated files
-  - "**/node_modules/**"
-  - "**/__pycache__/**"
-  - "**/*.pyc"
-  - "**/venv/**"
-  - "**/.venv/**"
-  - "**/dist/**"
-  - "**/build/**"
-  - "**/*.egg-info/**"
+- '**/node_modules/**'
+- '**/__pycache__/**'
+- '**/*.pyc'
+- '**/venv/**'
+- '**/.venv/**'
+- '**/dist/**'
+- '**/build/**'
+- '**/*.egg-info/**'
 
   # Database migrations (auto-generated)
-  - "**/migrations/versions/**"
+- '**/migrations/versions/**'
 
   # Example configurations
-  - "examples/**"
-  - "deploy/examples/**"
+- examples/**
+- deploy/examples/**
 
   # Development scripts
-  - "scripts/dev/**"
-  - "scripts/test/**"
+- scripts/dev/**
+- scripts/test/**
 
   # Third-party code
-  - "**/vendor/**"
-  - "**/static/vendor/**"
+- '**/vendor/**'
+- '**/static/vendor/**'
 
 # Specific query filters
 query-filters:
   # Python-specific suppressions
-  - exclude:
-      id: py/unsafe-cyclic-import
+- exclude:
+    id: py/unsafe-cyclic-import
       # Justification: TYPE_CHECKING imports are never executed at runtime.
       # This is the standard Python pattern for avoiding circular imports
       # while maintaining type safety. Used extensively in SQLAlchemy models.
 
-  - exclude:
-      id: py/unused-import
+- exclude:
+    id: py/unused-import
       # Justification: Imports under TYPE_CHECKING blocks appear unused but are
       # required for type checking. Also, __init__.py re-exports are flagged
       # incorrectly as unused.
 
-  - exclude:
-      id: py/similar-function
+- exclude:
+    id: py/similar-function
       # Justification: Repository pattern and CRUD operations naturally have
       # similar structure. This is intentional design, not code duplication.
 
-  - exclude:
-      id: py/clear-text-logging-sensitive-data
+- exclude:
+    id: py/clear-text-logging-sensitive-data
       # Justification: We have careful controls around logging. Generic error
       # messages are logged, not actual sensitive data. This rule has too
       # many false positives for exception handling.
 
-  - exclude:
-      id: py/empty-except
+- exclude:
+    id: py/empty-except
       # Justification: We handle this with explanatory comments where needed.
       # Some optional imports legitimately have empty except blocks.
 
-  - exclude:
-      id: py/missing-equals-return-type
+- exclude:
+    id: py/missing-equals-return-type
       # Justification: SQLAlchemy models use __eq__ without explicit return
       # type annotations as the framework handles this.
 
-  - exclude:
-      id: py/wrong-name-for-self
+- exclude:
+    id: py/wrong-name-for-self
       # Justification: Class methods and metaclasses legitimately use 'cls'
       # instead of 'self'. This is standard Python practice.
 
   # Security-specific suppressions (use with caution)
-  - exclude:
-      id: py/hardcoded-credentials
+- exclude:
+    id: py/hardcoded-credentials
       # Justification: Development examples and test fixtures contain
       # example credentials that are clearly marked as such.
       # Production credentials are never hardcoded.
-      paths:
-        - "examples/**"
-        - "tests/**"
-        - "scripts/dev/**"
+    paths:
+    - examples/**
+    - tests/**
+    - scripts/dev/**
 
-  - exclude:
-      id: py/path-injection
+- exclude:
+    id: py/path-injection
       # Justification: Harbor requires file system access for Docker socket
       # and configuration files. Paths are validated and sanitized.
-      paths:
-        - "app/utils/files.py"
-        - "app/db/backup.py"
+    paths:
+    - app/utils/files.py
+    - app/db/backup.py
 
   # JavaScript/TypeScript suppressions (if applicable)
-  - exclude:
-      id: js/unused-local-variable
+- exclude:
+    id: js/unused-local-variable
       # Justification: Alpine.js components use x-data variables that
       # appear unused in static analysis.
-      paths:
-        - "app/web/static/js/**"
+    paths:
+    - app/web/static/js/**
 
-  - exclude:
-      id: js/missing-rate-limiting
+- exclude:
+    id: js/missing-rate-limiting
       # Justification: Rate limiting is handled at the middleware level
       # in FastAPI, not in individual JavaScript files.
 
@@ -128,19 +129,18 @@ query-filters:
 languages:
   python:
     # Python version for analysis
-    python_version: "3.12"
+    python_version: '3.12'
 
     # Additional paths to analyze
     paths:
-      - "app/**/*.py"
-      - "tests/**/*.py"
-      - "scripts/**/*.py"
+    - app/**/*.py
+    - tests/**/*.py
+    - scripts/**/*.py
 
 # Severity thresholds (optional)
 # Only report issues of this severity or higher
 # Options: error, warning, recommendation
 minimum-severity: warning
-
 # Custom queries (optional)
 # You can add custom CodeQL queries here
 # custom-queries:

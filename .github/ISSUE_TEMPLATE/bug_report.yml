@@ -1,135 +1,136 @@
+---
 name: 🐛 Bug Report
 description: Create a report to help us improve Harbor
-title: "[Bug]: "
-labels: ["bug", "triage"]
+title: '[Bug]: '
+labels: [bug, triage]
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Thanks for taking the time to report a bug! Please fill out this form as completely as possible.
+- type: markdown
+  attributes:
+    value: |
+      Thanks for taking the time to report a bug! Please fill out this form as completely as possible.
 
-  - type: checkboxes
-    id: checklist
-    attributes:
-      label: Pre-submission checklist
-      options:
-        - label: I have searched existing issues to ensure this bug hasn't been reported before
-          required: true
-        - label: I have checked the documentation and troubleshooting guides
-          required: true
-        - label: I am running a supported version of Harbor
-          required: true
-
-  - type: textarea
-    id: description
-    attributes:
-      label: Bug Description
-      description: A clear and concise description of what the bug is
-      placeholder: Describe what happened and what you expected to happen
-    validations:
+- type: checkboxes
+  id: checklist
+  attributes:
+    label: Pre-submission checklist
+    options:
+    - label: I have searched existing issues to ensure this bug hasn't been reported before
+      required: true
+    - label: I have checked the documentation and troubleshooting guides
+      required: true
+    - label: I am running a supported version of Harbor
       required: true
 
-  - type: textarea
-    id: steps
-    attributes:
-      label: Steps to Reproduce
-      description: Steps to reproduce the behavior
-      placeholder: |
-        1. Go to '...'
-        2. Click on '....'
-        3. Scroll down to '....'
-        4. See error
-    validations:
-      required: true
+- type: textarea
+  id: description
+  attributes:
+    label: Bug Description
+    description: A clear and concise description of what the bug is
+    placeholder: Describe what happened and what you expected to happen
+  validations:
+    required: true
 
-  - type: textarea
-    id: expected
-    attributes:
-      label: Expected Behavior
-      description: What you expected to happen
-    validations:
-      required: true
+- type: textarea
+  id: steps
+  attributes:
+    label: Steps to Reproduce
+    description: Steps to reproduce the behavior
+    placeholder: |
+      1. Go to '...'
+      2. Click on '....'
+      3. Scroll down to '....'
+      4. See error
+  validations:
+    required: true
 
-  - type: textarea
-    id: actual
-    attributes:
-      label: Actual Behavior
-      description: What actually happened
-    validations:
-      required: true
+- type: textarea
+  id: expected
+  attributes:
+    label: Expected Behavior
+    description: What you expected to happen
+  validations:
+    required: true
 
-  - type: dropdown
-    id: deployment
-    attributes:
-      label: Deployment Type
-      description: How are you running Harbor?
-      options:
-        - Docker (single container)
-        - Docker Compose
-        - Kubernetes
-        - Development setup
-        - Other (please specify)
-    validations:
-      required: true
+- type: textarea
+  id: actual
+  attributes:
+    label: Actual Behavior
+    description: What actually happened
+  validations:
+    required: true
 
-  - type: input
-    id: version
-    attributes:
-      label: Harbor Version
-      description: What version of Harbor are you running?
-      placeholder: "v0.1.0"
-    validations:
-      required: true
+- type: dropdown
+  id: deployment
+  attributes:
+    label: Deployment Type
+    description: How are you running Harbor?
+    options:
+    - Docker (single container)
+    - Docker Compose
+    - Kubernetes
+    - Development setup
+    - Other (please specify)
+  validations:
+    required: true
 
-  - type: dropdown
-    id: os
-    attributes:
-      label: Operating System
-      description: What operating system are you using?
-      options:
-        - Linux (x86_64)
-        - Linux (ARM64)
-        - Linux (ARM v7 - Raspberry Pi)
-        - macOS (Intel)
-        - macOS (Apple Silicon)
-        - Windows (WSL2)
-        - Other (please specify)
-    validations:
-      required: true
+- type: input
+  id: version
+  attributes:
+    label: Harbor Version
+    description: What version of Harbor are you running?
+    placeholder: v0.1.0
+  validations:
+    required: true
 
-  - type: input
-    id: docker-version
-    attributes:
-      label: Docker Version
-      description: What version of Docker are you using?
-      placeholder: "24.0.7"
-    validations:
-      required: true
+- type: dropdown
+  id: os
+  attributes:
+    label: Operating System
+    description: What operating system are you using?
+    options:
+    - Linux (x86_64)
+    - Linux (ARM64)
+    - Linux (ARM v7 - Raspberry Pi)
+    - macOS (Intel)
+    - macOS (Apple Silicon)
+    - Windows (WSL2)
+    - Other (please specify)
+  validations:
+    required: true
 
-  - type: textarea
-    id: environment
-    attributes:
-      label: Environment Details
-      description: |
-        Additional environment information
-        - Python version (if running from source)
-        - Container runtime (Docker, Podman, etc.)
-        - Proxy or load balancer configuration
-        - Network setup details
-      placeholder: Any additional environment details that might be relevant
+- type: input
+  id: docker-version
+  attributes:
+    label: Docker Version
+    description: What version of Docker are you using?
+    placeholder: 24.0.7
+  validations:
+    required: true
 
-  - type: textarea
-    id: logs
-    attributes:
-      label: Relevant Logs
-      description: |
-        Please include relevant log output.
-        **Important**: Remove any sensitive information like API keys, passwords, or personal data.
-      render: shell
-      placeholder: Paste log output here
+- type: textarea
+  id: environment
+  attributes:
+    label: Environment Details
+    description: |
+      Additional environment information
+      - Python version (if running from source)
+      - Container runtime (Docker, Podman, etc.)
+      - Proxy or load balancer configuration
+      - Network setup details
+    placeholder: Any additional environment details that might be relevant
 
-  - type: textarea
-    id: additional
-    attributes:
-      label: Additional Context
-      description: Add any other context about the problem here, including screenshots if applicable
+- type: textarea
+  id: logs
+  attributes:
+    label: Relevant Logs
+    description: |
+      Please include relevant log output.
+      **Important**: Remove any sensitive information like API keys, passwords, or personal data.
+    render: shell
+    placeholder: Paste log output here
+
+- type: textarea
+  id: additional
+  attributes:
+    label: Additional Context
+    description: Add any other context about the problem here, including screenshots if applicable
