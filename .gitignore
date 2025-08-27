@@ -156,3 +156,13 @@ Desktop.ini
 docs/_build/
 site/
 mkdocs_build/
+
+
+# =============================================================================
+# Node.js (add this section after Virtual Environments)
+# =============================================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
