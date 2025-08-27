@@ -1,0 +1,117 @@
+---
+# deploy/docker/docker-compose.prod.yml
+# Harbor Container Updater - Secure Production Deployment
+
+
+services:
+  # Docker socket proxy for enhanced security
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: harbor-socket-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      NETWORKS: 1
+      VOLUMES: 1
+      INFO: 1
+      VERSION: 1
+      POST: 1  # Required for container operations
+      BUILD: 0
+      COMMIT: 0
+      EXEC: 0
+    volumes:
+    - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+    - harbor-internal
+    security_opt:
+    - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.5'
+
+  harbor:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: harbor/harbor:latest
+    container_name: harbor
+    restart: unless-stopped
+    depends_on:
+    - socket-proxy
+
+    ports:
+    - 127.0.0.1:8080:8080      # Only localhost
+
+    volumes:
+    - harbor_data:/app/data
+    - harbor_logs:/app/logs
+    - ../../config/production.yaml:/app/config/production.yaml:ro
+
+    environment:
+      # Production mode
+    - HARBOR_MODE=production
+
+      # Use socket proxy
+    - DOCKER_HOST=tcp://socket-proxy:2375
+
+      # Security
+    - REQUIRE_HTTPS=true
+    - SESSION_TIMEOUT_HOURS=8
+    - API_RATE_LIMIT_PER_HOUR=5000
+    - HARBOR_SECRET_KEY_FILE=/run/secrets/harbor_secret
+
+      # Database (PostgreSQL example)
+      # - DATABASE_URL=postgresql://harbor:${DB_PASSWORD}@postgres:5432/harbor
+
+      # Monitoring
+    - ENABLE_METRICS=true
+    - ENABLE_HEALTH_CHECKS=true
+    - ENABLE_AUDIT_EXPORT=true
+
+      # Performance
+    - MAX_CONCURRENT_UPDATES=10
+    - HARBOR_MAX_WORKERS=4
+    - DATABASE_POOL_SIZE=20
+
+    networks:
+    - harbor-internal
+    - harbor-public
+
+    security_opt:
+    - no-new-privileges:true
+
+    secrets:
+    - harbor_secret
+
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+
+networks:
+  harbor-internal:
+    internal: true
+    driver: bridge
+  harbor-public:
+    driver: bridge
+
+volumes:
+  harbor_data:
+    driver: local
+    labels:
+    - com.harbor.description=Harbor production data
+  harbor_logs:
+    driver: local
+    labels:
+    - com.harbor.description=Harbor production logs
+
+secrets:
+  harbor_secret:
+    file: ../../secrets/harbor_secret.txt
