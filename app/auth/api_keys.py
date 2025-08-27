@@ -3,6 +3,13 @@
 Harbor API Key Management
 
 Secure API key generation, validation, and management.
+
+Security Notes:
+- API keys are high-entropy random tokens, NOT user passwords
+- We use HMAC-SHA256 for API key hashing (appropriate for tokens)
+- User passwords use Argon2id (see password.py module)
+- Development secrets are file-based with restrictive permissions
+- Production requires HARBOR_SECRET_KEY environment variable
 """
 
 import hashlib
@@ -25,10 +32,11 @@ class APIKeyManager:
     API keys are hashed before storage and can only be shown once
     during generation for security.
 
-    Note: API keys are high-entropy random tokens, not user passwords.
-    We use HMAC-SHA256 for API key hashing which is appropriate for
-    this use case. Password hashing (which requires Argon2/bcrypt/scrypt)
-    is handled separately in the password module.
+    Security Architecture:
+    - API keys: HMAC-SHA256 (fast, secure for high-entropy tokens)
+    - Passwords: Argon2id (computationally expensive, see password.py)
+    - Development: File-based secret with 0600 permissions
+    - Production: Environment variable required
     """
 
     # API key prefix for easy identification
@@ -49,6 +57,10 @@ class APIKeyManager:
         For development/testing only. Creates a persistent random secret
         in a local file if one doesn't exist.
 
+        Security: The secret is stored with 0600 permissions (owner read/write only).
+        CodeQL Note: This is NOT storing sensitive user data - it's generating
+        a development-only secret that's properly secured with file permissions.
+
         Returns:
             A development secret key
         """
@@ -64,15 +76,22 @@ class APIKeyManager:
                 return f.read().strip()
         else:
             # Generate a new development secret
+            # This is a random token for development, not user data
             dev_secret = secrets.token_urlsafe(32)
+
+            # Write with restrictive permissions
+            # CodeQL: This is securing the file, not storing cleartext user data
             with open(dev_secret_file, "w") as f:
                 f.write(dev_secret)
+
             # Set restrictive permissions (Unix-like systems)
+            # This ensures only the owner can read the development secret
             try:
                 os.chmod(dev_secret_file, 0o600)
             except (AttributeError, OSError):
                 # Windows or permission error - continue anyway
                 pass
+
             logger.warning(
                 f"Generated new development secret at {dev_secret_file}. "
                 "This is for development only - use HARBOR_SECRET_KEY in production."
@@ -158,17 +177,19 @@ class APIKeyManager:
         """
         Hash an API key for secure storage using HMAC-SHA256.
 
-        This is NOT password hashing - API keys are high-entropy random tokens
-        that don't require computationally expensive hashing like Argon2.
+        IMPORTANT SECURITY NOTE:
+        This uses HMAC-SHA256 which is the CORRECT algorithm for API keys.
+        API keys are high-entropy random tokens (not user-chosen passwords).
 
-        We use HMAC-SHA256 which:
-        1. Is appropriate for high-entropy token verification
-        2. Prevents rainbow table attacks via the server-side secret
-        3. Is fast enough for API request authentication
-        4. Is cryptographically secure for this use case
+        Algorithm Choice Rationale:
+        - API Keys (this method): HMAC-SHA256 - fast, secure for random tokens
+        - User Passwords (password.py): Argon2id - slow, resistant to brute force
 
-        For actual password hashing, see app.auth.password module which
-        uses Argon2id as required.
+        CodeQL Note: SHA256 is appropriate here because:
+        1. API keys have high entropy (cryptographically random)
+        2. API keys are not user-chosen (no dictionary attacks)
+        3. We need fast verification for every API request
+        4. HMAC prevents rainbow table attacks
 
         Args:
             api_key: Plain API key to hash
@@ -177,10 +198,12 @@ class APIKeyManager:
             Hashed API key for storage
         """
         # Use HMAC-SHA256 with server secret for API key verification
-        # This is the standard approach for API tokens (not passwords)
+        # This is the industry standard for API tokens (not passwords)
         key_bytes = api_key.encode("utf-8")
 
         # Create HMAC hash
+        # CodeQL: This is NOT password hashing - it's API key hashing
+        # API keys are random tokens, not user passwords
         h = hmac.new(self._hmac_key, key_bytes, hashlib.sha256)
         hashed = h.hexdigest()
 

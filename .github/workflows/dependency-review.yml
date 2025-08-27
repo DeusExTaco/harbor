@@ -45,7 +45,7 @@ jobs:
           # Allow moderate vulnerabilities during M0 development
           fail-on-severity: critical
 
-          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, BSD, ISC, PSF-2.0, Python-2.0, 0BSD, Unlicense
+          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, PSF-2.0, Python-2.0, 0BSD, Unlicense
 
           # Comment summary in PR only on failure
           comment-summary-in-pr: on-failure
