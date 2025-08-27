@@ -156,6 +156,8 @@ Desktop.ini
 docs/_build/
 site/
 mkdocs_build/
+docs/api/_generated/
+mkdocs_cache/
 
 
 # =============================================================================
@@ -166,3 +168,30 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .npm
+
+# =============================================================================
+# Harbor Specific
+# =============================================================================
+# Development secrets (never commit)
+.harbor/
+harbor-dev-data/
+!.harbor/.gitkeep
+secrets/
+!secrets/.gitkeep
+!secrets/README.md
+*.key
+*.pem
+*.crt
+*.pfx
+
+# Generated files
+VERSION.tmp
+harbor-*.tar.gz
+harbor-*.zip
+
+# Integration test containers
+test-containers/
+
+# Performance test results
+perf-results/
+*.bench
