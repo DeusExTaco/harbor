@@ -26,6 +26,14 @@ env/
 # PyCharm
 .idea/
 *.iml
+idea/
+/idea
+/idea/
+idea
+idea/*
+idea/*.xml
+/idea/*
+
 
 # VS Code
 .vscode/
