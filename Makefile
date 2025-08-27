@@ -321,6 +321,28 @@ dev-docs-open: ## Open development documentation in browser
 	@open docs/development.md || xdg-open docs/development.md || echo "Please open docs/development.md manually"
 
 # =============================================================================
+# Production Commands
+# =============================================================================
+prod-up: ## Start production environment (home lab)
+	@echo "Starting Harbor production environment..."
+	@cd deploy/docker && docker-compose -f docker-compose.yml up -d
+	@echo "Harbor production started at http://localhost:8080"
+
+prod-up-secure: ## Start secure production environment with socket proxy
+	@echo "Starting secure Harbor production..."
+	@cd deploy/docker && docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+	@echo "Secure Harbor production started (localhost only)"
+
+prod-down: ## Stop production environment
+	@cd deploy/docker && docker-compose -f docker-compose.yml down
+
+prod-logs: ## View production logs
+	@cd deploy/docker && docker-compose -f docker-compose.yml logs -f harbor
+
+prod-build: ## Build production image
+	@cd deploy/docker && docker-compose -f docker-compose.yml build
+
+# =============================================================================
 # Example Management (following project structure)
 # =============================================================================
 dev-example-basic: ## Start basic home lab example
