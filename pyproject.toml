@@ -58,7 +58,7 @@ dependencies = [
 
     # Security
     "argon2-cffi>=23.1.0,<24.0.0",        # Password hashing
-    "cryptography>=41.0.0,<43.0.0",       # Credential encryption
+    "cryptography>=43.0.0,<44.0.0",       # Credential encryption
 
     # Utilities
     "python-dateutil>=2.8.0,<3.0.0",
@@ -175,26 +175,31 @@ exclude = ["tests*"]
 # =============================================================================
 
 [tool.pytest.ini_options]
+minversion = "7.0"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
-python_files = ["test_*.py"]
+python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = [
-    "--cov=app",
-    "--cov-report=html:htmlcov",
-    "--cov-report=term-missing",
-    "--cov-report=xml",
     "--strict-markers",
-    "--disable-warnings",
-    "-v",
+    "--tb=short",
+    "--cov=app",
+    "--cov-branch",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+    "--cov-fail-under=0",  # Set to desired minimum coverage later
 ]
 markers = [
     "unit: Unit tests",
     "integration: Integration tests",
     "e2e: End-to-end tests",
-    "performance: Performance tests",
-    "security: Security tests",
+    "database: Tests requiring database",
     "slow: Slow running tests",
+    "needs_database_init: tests requiring full database initialization (deselect with '-m \"not needs_database_init\"')",
+
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",

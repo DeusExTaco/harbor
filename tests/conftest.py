@@ -78,16 +78,15 @@ def temp_data_dir():
 # ============================================================================
 
 
-@pytest.fixture(scope="session")
-def test_database_url(test_data_dir):
-    """Provide test database URL - updated for async SQLite"""
-    # Use in-memory SQLite for fastest tests
+@pytest.fixture(scope="function")  # Change to function scope
+def test_database_url():
+    """Provide test database URL - use new in-memory DB for each test"""
     return "sqlite+aiosqlite:///:memory:"
 
 
-@pytest.fixture
+@pytest.fixture(scope="function")  # Change to function scope
 async def test_engine(test_database_url: str) -> AsyncGenerator[AsyncEngine]:
-    """Create test database engine"""
+    """Create test database engine per test for isolation"""
     engine = create_async_engine(
         test_database_url,
         poolclass=StaticPool,
@@ -98,7 +97,7 @@ async def test_engine(test_database_url: str) -> AsyncGenerator[AsyncEngine]:
         echo=False,  # Set to True for SQL debugging
     )
 
-    # Create all tables
+    # Create all tables for this test
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -108,9 +107,9 @@ async def test_engine(test_database_url: str) -> AsyncGenerator[AsyncEngine]:
     await engine.dispose()
 
 
-@pytest.fixture(scope="session")
-async def test_session_factory(test_engine: AsyncEngine) -> async_sessionmaker:
-    """Create test session factory"""
+@pytest.fixture(scope="function")  # Change to function scope
+def test_session_factory(test_engine: AsyncEngine) -> async_sessionmaker:
+    """Create test session factory per test"""
     return async_sessionmaker(
         test_engine,
         class_=AsyncSession,
@@ -126,14 +125,9 @@ async def async_session(
 ) -> AsyncGenerator[AsyncSession]:
     """Create isolated test session with automatic rollback"""
     async with test_session_factory() as session:
-        # Start a transaction
-        transaction = await session.begin()
-
-        try:
+        async with session.begin():
             yield session
-        finally:
-            # Always rollback to ensure test isolation
-            await transaction.rollback()
+            # Transaction rolls back here automatically
 
 
 @pytest.fixture
@@ -142,19 +136,30 @@ async def committed_session(
 ) -> AsyncGenerator[AsyncSession]:
     """Create test session that commits changes (for integration tests)"""
     async with test_session_factory() as session:
+        # Don't use a transaction context that auto-rolls back
         yield session
+        await session.close()
 
-        # Cleanup after test
-        try:
-            # Delete all test data in reverse dependency order
-            await session.execute("DELETE FROM container_policies")
-            await session.execute("DELETE FROM containers")
-            await session.execute("DELETE FROM api_keys")
-            await session.execute("DELETE FROM users")
-            await session.execute("DELETE FROM system_settings")
-            await session.commit()
-        except Exception:
-            await session.rollback()
+
+@pytest.fixture
+async def test_user(committed_session: AsyncSession) -> User:
+    """Create a test user fixture for integration tests"""
+    from app.auth.password import hash_password
+    from app.db.models.user import User
+
+    user = User(
+        username="testuser",
+        password_hash=hash_password("TestPassword123!"),
+        email="test@example.com",
+        is_active=True,
+        is_admin=False,
+    )
+
+    committed_session.add(user)
+    await committed_session.flush()  # Use flush instead of commit
+    # Don't refresh here - the session is still active
+
+    return user
 
 
 # ============================================================================

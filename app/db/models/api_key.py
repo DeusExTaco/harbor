@@ -7,6 +7,7 @@ API key model for programmatic access with proper typing.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -91,8 +92,9 @@ class APIKey(BaseModel):
         doc="Whether key is active",
     )
 
-    # Future: Scoped permissions
-    scopes: Mapped[str] = mapped_column(
+    # Future: Scoped permissions - stored as JSON string
+    _scopes: Mapped[str] = mapped_column(
+        "scopes",
         Text,
         nullable=False,
         default='["admin"]',
@@ -115,6 +117,42 @@ class APIKey(BaseModel):
         lazy="select",
     )
 
+    @property
+    def scopes(self) -> list[str]:
+        """Get scopes as a Python list"""
+        try:
+            return json.loads(self._scopes) if self._scopes else ["admin"]
+        except (json.JSONDecodeError, TypeError):
+            return ["admin"]
+
+    @scopes.setter
+    def scopes(self, value: list[str] | str | None) -> None:
+        """Set scopes from a list or JSON string"""
+        if value is None:
+            self._scopes = '["admin"]'
+        elif isinstance(value, str):
+            # If it's already a JSON string, validate it
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, list):
+                    self._scopes = value
+                else:
+                    self._scopes = '["admin"]'
+            except json.JSONDecodeError:
+                self._scopes = '["admin"]'
+        else:  # This must be a list[str] based on type hint
+            # Convert list to JSON string
+            # Validate scopes
+            valid_scopes = ["admin", "read", "write", "containers", "users"]
+            filtered = [s for s in value if s in valid_scopes]
+            if not filtered:
+                filtered = ["admin"]
+            self._scopes = json.dumps(filtered, sort_keys=True)
+
+        # Update timestamp when scopes change
+        if hasattr(self, "update_timestamp"):
+            self.update_timestamp()
+
     def __repr__(self) -> str:
         return f"<APIKey(id={self.id}, name='{self.name}', active={self.is_active})>"
 
@@ -133,40 +171,19 @@ class APIKey(BaseModel):
         self.update_timestamp()
 
     def get_scopes(self) -> list[str]:
-        """Get API key scopes as list"""
-        import json
-
-        try:
-            scopes = json.loads(self.scopes or '["admin"]')
-            if isinstance(scopes, list):
-                return scopes
-            return ["admin"]
-        except json.JSONDecodeError:
-            return ["admin"]
+        """Get API key scopes as list (alias for property)"""
+        return self.scopes
 
     def set_scopes(self, scopes: list[str]) -> None:
-        """Set API key scopes from list"""
-        import json
-
-        # Validate scopes (basic validation)
-        valid_scopes = [
-            "admin",
-            "read",
-            "write",
-            "containers",
-            "users",
-        ]  # Add more as needed
-        filtered_scopes = [scope for scope in scopes if scope in valid_scopes]
-        if not filtered_scopes:
-            filtered_scopes = ["admin"]  # Default to admin
-
-        self.scopes = json.dumps(filtered_scopes, sort_keys=True)
-        self.update_timestamp()
+        """Set API key scopes from list (uses property setter)"""
+        self.scopes = scopes
 
     def has_scope(self, scope: str) -> bool:
         """Check if API key has specific scope"""
-        scopes = self.get_scopes()
-        return scope in scopes or "admin" in scopes  # Admin has all scopes
+        current_scopes = self.scopes
+        return (
+            scope in current_scopes or "admin" in current_scopes
+        )  # Admin has all scopes
 
     def is_expired(self) -> bool:
         """Check if API key is expired"""
@@ -202,14 +219,17 @@ class APIKey(BaseModel):
         if not include_sensitive:
             exclude.add("key_hash")
 
+        # Exclude the internal _scopes field
+        exclude.add("_scopes")
+
         # Update kwargs with modified exclude set
         kwargs["exclude"] = exclude
 
         # Call parent with updated kwargs
         result = super().to_dict(**kwargs)
 
-        # Parse JSON fields
-        result["scopes"] = self.get_scopes()
+        # Add the parsed scopes
+        result["scopes"] = self.scopes
 
         # Add computed fields
         result["is_expired"] = self.is_expired()
@@ -241,6 +261,6 @@ class APIKey(BaseModel):
             if self.last_used_at
             else None,
             "usage_count": self.usage_count,
-            "scopes": self.get_scopes(),
+            "scopes": self.scopes,  # Uses the property
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
         }

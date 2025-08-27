@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 from app.config import DeploymentProfile, get_settings
 from app.utils.logging import get_logger
@@ -97,28 +98,47 @@ class DatabaseConfig:
 
     def get_connection_config(self) -> dict[str, Any]:
         """
-        Get connection pool configuration.
+        Get connection pool configuration based on database type.
 
         Returns:
             Connection pool configuration dict
         """
+        database_url = self.get_database_url()
+
+        # SQLite with StaticPool doesn't accept pool parameters
+        if "sqlite" in database_url.lower():
+            return {
+                "poolclass": StaticPool,
+                "connect_args": {
+                    "check_same_thread": False,
+                },
+                "echo": False,
+            }
+
+        # PostgreSQL and other databases can use pool parameters
         if self.deployment_profile == DeploymentProfile.HOMELAB:
             return {
                 "pool_size": 5,
                 "max_overflow": 2,
                 "pool_timeout": 30,
                 "echo": False,
-                "connect_args": {"check_same_thread": False}
-                if self.is_sqlite()
-                else {},
+                "pool_pre_ping": True,
             }
-        else:
+        elif self.deployment_profile == DeploymentProfile.PRODUCTION:
             return {
                 "pool_size": 20,
                 "max_overflow": 10,
                 "pool_timeout": 60,
                 "echo": False,
                 "pool_pre_ping": True,  # Verify connections before use in production
+            }
+        else:  # Development/staging
+            return {
+                "pool_size": 10,
+                "max_overflow": 5,
+                "pool_timeout": 30,
+                "echo": False,
+                "pool_pre_ping": True,
             }
 
     def is_sqlite(self) -> bool:
@@ -165,11 +185,6 @@ async def get_engine(force_new: bool = False) -> AsyncEngine:
         config = get_database_config()
         database_url = config.get_database_url(async_driver=True)
         connection_config = config.get_connection_config()
-
-        # Remove SQLite-specific connect_args for PostgreSQL
-        if not is_sqlite() and "connect_args" in connection_config:
-            if not connection_config["connect_args"]:  # Empty dict for PostgreSQL
-                del connection_config["connect_args"]
 
         _engine = create_async_engine(database_url, **connection_config)
 

@@ -33,6 +33,8 @@ exclude_dirs:
 - docs/_build
 - examples
 - deploy/examples
+- /tests/
+- /scripts/
 
 # Exclude specific file patterns
 exclude:

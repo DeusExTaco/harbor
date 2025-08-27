@@ -170,6 +170,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
         print("⚠️ Database system not available")
         startup_success = False
 
+    if db_ready and settings.deployment_profile.value == "development":
+        print("\n📝 Development Credentials:")
+        print("   Username: admin")
+        print("   Password: Harbor123!")
+        print("   Dashboard: http://localhost:8080")
+
     # Security middleware status (M0 implementation)
     if SECURITY_AVAILABLE:
         print("🔐 Security middleware: ✅ Enabled")
@@ -276,6 +282,11 @@ def create_app() -> FastAPI:
         print(
             "⚠️ Security middleware not available - continuing without security features"
         )
+
+    # Register API routers
+    from app.api.auth import router as auth_router
+
+    app.include_router(auth_router)
 
     # Health check endpoint (required for Docker health checks)
     @app.get("/healthz")

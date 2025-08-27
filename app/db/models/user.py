@@ -75,6 +75,33 @@ class User(BaseModel):
         doc="Number of successful logins",
     )
 
+    # Login tracking fields
+    failed_login_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        doc="Number of failed login attempts",
+    )
+
+    last_failed_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="Timestamp of last failed login attempt",
+    )
+
+    last_login_ip: Mapped[str | None] = mapped_column(
+        String(45),  # IPv6 compatible
+        nullable=True,
+        doc="IP address of last successful login",
+    )
+
+    password_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="Timestamp of last password change",
+    )
+
     # Account status
     is_active: Mapped[bool] = mapped_column(
         Boolean,
