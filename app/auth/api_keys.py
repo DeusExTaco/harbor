@@ -6,7 +6,10 @@ Secure API key generation, validation, and management.
 """
 
 import hashlib
+import hmac
+import os
 import secrets
+from pathlib import Path
 
 from app.config import get_settings
 from app.utils.logging import get_logger
@@ -21,6 +24,11 @@ class APIKeyManager:
 
     API keys are hashed before storage and can only be shown once
     during generation for security.
+
+    Note: API keys are high-entropy random tokens, not user passwords.
+    We use HMAC-SHA256 for API key hashing which is appropriate for
+    this use case. Password hashing (which requires Argon2/bcrypt/scrypt)
+    is handled separately in the password module.
     """
 
     # API key prefix for easy identification
@@ -30,6 +38,101 @@ class APIKeyManager:
     def __init__(self):
         """Initialize API key manager."""
         self.settings = get_settings()
+        # Use a server-side secret for HMAC to prevent rainbow table attacks
+        # This is derived from the main secret key
+        self._hmac_key = self._derive_hmac_key()
+
+    def _get_or_create_development_secret(self) -> str:
+        """
+        Get or create a development secret key.
+
+        For development/testing only. Creates a persistent random secret
+        in a local file if one doesn't exist.
+
+        Returns:
+            A development secret key
+        """
+        # Use a file-based approach for development to avoid hardcoding
+        dev_secret_file = Path.home() / ".harbor" / ".dev_secret"
+
+        # Create directory if it doesn't exist
+        dev_secret_file.parent.mkdir(parents=True, exist_ok=True)
+
+        if dev_secret_file.exists():
+            # Read existing development secret
+            with open(dev_secret_file) as f:
+                return f.read().strip()
+        else:
+            # Generate a new development secret
+            dev_secret = secrets.token_urlsafe(32)
+            with open(dev_secret_file, "w") as f:
+                f.write(dev_secret)
+            # Set restrictive permissions (Unix-like systems)
+            try:
+                os.chmod(dev_secret_file, 0o600)
+            except (AttributeError, OSError):
+                # Windows or permission error - continue anyway
+                pass
+            logger.warning(
+                f"Generated new development secret at {dev_secret_file}. "
+                "This is for development only - use HARBOR_SECRET_KEY in production."
+            )
+            return dev_secret
+
+    def _derive_hmac_key(self) -> bytes:
+        """
+        Derive a stable HMAC key from the application secret.
+
+        Returns:
+            Bytes to use as HMAC key
+
+        Raises:
+            ValueError: If no secret key is configured in production mode
+        """
+        # Get the main application secret - check different possible locations
+        settings = self.settings
+
+        # Try different possible attribute names for the secret key
+        app_secret = None
+
+        # Check if secret_key exists at root level
+        if hasattr(settings, "secret_key"):
+            app_secret = settings.secret_key
+        # Check if it's under security settings with different name
+        elif hasattr(settings, "security"):
+            if hasattr(settings.security, "secret_key"):
+                app_secret = settings.security.secret_key
+            elif hasattr(settings.security, "app_secret_key"):
+                app_secret = settings.security.app_secret_key
+            elif hasattr(settings.security, "harbor_secret_key"):
+                app_secret = settings.security.harbor_secret_key
+
+        # If still not found, check environment variable directly
+        if not app_secret:
+            app_secret = os.getenv("HARBOR_SECRET_KEY")
+
+        # Handle missing secret based on environment
+        if not app_secret:
+            harbor_mode = os.getenv("HARBOR_MODE", "production")
+            is_testing = os.getenv("TESTING") == "true"
+
+            if is_testing or harbor_mode == "development":
+                # For development/testing, use a generated secret
+                logger.warning(
+                    "No HARBOR_SECRET_KEY found, using generated development secret"
+                )
+                app_secret = self._get_or_create_development_secret()
+            else:
+                # In production, this is a critical error
+                raise ValueError(
+                    "No secret key configured. Set HARBOR_SECRET_KEY environment variable."
+                )
+
+        # Derive a specific key for API key hashing
+        # This ensures API keys remain valid across app restarts
+        derived_key = hashlib.sha256(f"{app_secret}_api_key_hmac".encode()).digest()
+
+        return derived_key
 
     def generate_api_key(self) -> tuple[str, str]:
         """
@@ -39,7 +142,7 @@ class APIKeyManager:
             Tuple of (plain_key, hashed_key)
             The plain key should only be shown once to the user
         """
-        # Generate random key
+        # Generate cryptographically secure random token
         random_part = secrets.token_urlsafe(self.KEY_LENGTH)
 
         # Create full key with prefix
@@ -53,18 +156,34 @@ class APIKeyManager:
 
     def hash_api_key(self, api_key: str) -> str:
         """
-        Hash an API key for secure storage.
+        Hash an API key for secure storage using HMAC-SHA256.
+
+        This is NOT password hashing - API keys are high-entropy random tokens
+        that don't require computationally expensive hashing like Argon2.
+
+        We use HMAC-SHA256 which:
+        1. Is appropriate for high-entropy token verification
+        2. Prevents rainbow table attacks via the server-side secret
+        3. Is fast enough for API request authentication
+        4. Is cryptographically secure for this use case
+
+        For actual password hashing, see app.auth.password module which
+        uses Argon2id as required.
 
         Args:
             api_key: Plain API key to hash
 
         Returns:
-            Hashed API key
+            Hashed API key for storage
         """
-        # Use SHA-256 for API key hashing (faster than argon2 for this use case)
-        # API keys are already high-entropy random strings
+        # Use HMAC-SHA256 with server secret for API key verification
+        # This is the standard approach for API tokens (not passwords)
         key_bytes = api_key.encode("utf-8")
-        hashed = hashlib.sha256(key_bytes).hexdigest()
+
+        # Create HMAC hash
+        h = hmac.new(self._hmac_key, key_bytes, hashlib.sha256)
+        hashed = h.hexdigest()
+
         return hashed
 
     def validate_api_key_format(self, api_key: str) -> bool:
@@ -88,6 +207,16 @@ class APIKeyManager:
         if len(api_key) < len(self.KEY_PREFIX) + 20:
             return False
 
+        # Ensure it only contains valid characters (URL-safe base64)
+        # This prevents injection attacks
+        # Define valid characters for URL-safe base64
+        valid_chars = set(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"  # pragma: allowlist secret
+        )
+        key_suffix = api_key[len(self.KEY_PREFIX) :]
+        if not all(c in valid_chars for c in key_suffix):
+            return False
+
         return True
 
     def extract_key_hash(self, api_key: str) -> str | None:
@@ -98,12 +227,33 @@ class APIKeyManager:
             api_key: Plain API key
 
         Returns:
-            Hashed key for database lookup
+            Hashed key for database lookup, or None if invalid
         """
         if not self.validate_api_key_format(api_key):
             return None
 
         return self.hash_api_key(api_key)
+
+    def verify_api_key(self, plain_key: str, stored_hash: str) -> bool:
+        """
+        Verify an API key against its stored hash.
+
+        Uses constant-time comparison to prevent timing attacks.
+
+        Args:
+            plain_key: Plain API key to verify
+            stored_hash: Stored hash from database
+
+        Returns:
+            True if the API key is valid
+        """
+        if not self.validate_api_key_format(plain_key):
+            return False
+
+        computed_hash = self.hash_api_key(plain_key)
+
+        # Use constant-time comparison to prevent timing attacks
+        return hmac.compare_digest(computed_hash, stored_hash)
 
 
 # Global API key manager instance
@@ -132,3 +282,8 @@ def hash_api_key(api_key: str) -> str:
 def validate_api_key(api_key: str) -> bool:
     """Validate API key format."""
     return get_api_key_manager().validate_api_key_format(api_key)
+
+
+def verify_api_key(plain_key: str, stored_hash: str) -> bool:
+    """Verify an API key against its stored hash."""
+    return get_api_key_manager().verify_api_key(plain_key, stored_hash)

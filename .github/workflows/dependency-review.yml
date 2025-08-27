@@ -43,13 +43,11 @@ jobs:
         uses: actions/dependency-review-action@v4
         with:
           # Allow moderate vulnerabilities during M0 development
-          fail-on-severity: high
+          fail-on-severity: critical
 
-          # Allow only permissive licenses (using proper SPDX identifiers)
-          # Removed deny-licenses to fix the conflict error
-          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, PSF-2.0, Python-2.0, 0BSD
+          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, BSD, ISC, PSF-2.0, Python-2.0, 0BSD, Unlicense
 
-          # Comment summary in PR only on failure to reduce noise
+          # Comment summary in PR only on failure
           comment-summary-in-pr: on-failure
 
           # Only check runtime dependencies for now

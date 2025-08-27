@@ -96,6 +96,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
 
     startup_success = True
     session_manager = None
+    db_ready = False  # Initialize db_ready here to avoid uninitialized variable error
+    settings = None  # Initialize settings as well
 
     # Configuration validation
     if CONFIG_AVAILABLE:
@@ -166,11 +168,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
             logger.error(f"Database initialization failed: {e}")
             print(f"❌ Database initialization failed: {e}")
             startup_success = False
+            db_ready = False  # Ensure db_ready is set even on failure
     elif not DATABASE_AVAILABLE:
         print("⚠️ Database system not available")
         startup_success = False
+        db_ready = False  # Ensure db_ready is set when database is not available
 
-    if db_ready and settings.deployment_profile.value == "development":
+    # Only show development credentials if database is ready and in development mode
+    if db_ready and settings and settings.deployment_profile.value == "development":
         print("\n📝 Development Credentials:")
         print("   Username: admin")
         print("   Password: Harbor123!")
@@ -178,7 +183,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
 
     # Security middleware status (M0 implementation)
     if SECURITY_AVAILABLE:
-        print("🔐 Security middleware: ✅ Enabled")
+        print("🔒 Security middleware: ✅ Enabled")
         print("  - Security headers: ✅")
         print("  - Rate limiting: ✅")
         print("  - Input validation: ✅")
@@ -264,7 +269,7 @@ def create_app() -> FastAPI:
         try:
             # Method 1: Use the setup function from security module
             app = setup_security_middleware(app)
-            print("🔐 Security middleware configured via setup function")
+            print("🔒 Security middleware configured via setup function")
 
         except Exception as e:
             # Method 2: Fallback to manual middleware setup
@@ -273,7 +278,7 @@ def create_app() -> FastAPI:
                 app.add_middleware(RateLimitMiddleware)
                 app.add_middleware(SecurityHeadersMiddleware)
 
-                print("🔐 Security middleware configured manually")
+                print("🔒 Security middleware configured manually")
             except Exception as e2:
                 logger.error(f"Security middleware setup failed: {e2}, original: {e}")
                 print(f"⚠️ Security middleware setup failed: {e2}")
@@ -900,7 +905,7 @@ def main() -> None:
         print()
 
     if SECURITY_AVAILABLE:
-        print("🔐 Security endpoints:")
+        print("🔒 Security endpoints:")
         print("  curl http://localhost:8080/security/status | jq .")
         print(
             "  curl -I http://localhost:8080/ | grep -E '(X-|Content-Security|Strict-Transport)'"

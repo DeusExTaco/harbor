@@ -41,6 +41,36 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 
 
+def sanitize_for_logging(value: str) -> str:
+    """
+    Sanitize user input for safe logging.
+
+    Removes newlines and carriage returns to prevent log injection attacks.
+    Limits length to prevent excessive log entries.
+
+    Args:
+        value: The string to sanitize
+
+    Returns:
+        Sanitized string safe for logging
+    """
+    if not value:
+        return ""
+
+    # Remove newlines, carriage returns, and other control characters
+    sanitized = value.replace("\r", "").replace("\n", "").replace("\t", " ")
+
+    # Remove any other control characters
+    sanitized = "".join(char if ord(char) >= 32 else "" for char in sanitized)
+
+    # Limit length to prevent log flooding
+    max_length = 100
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length] + "..."
+
+    return sanitized
+
+
 @router.post("/login", response_model=LoginResponse)
 async def login(
     request: Request,
@@ -60,7 +90,9 @@ async def login(
     user = result.scalar_one_or_none()
 
     if not user:
-        logger.warning(f"Login attempt for non-existent user: {login_data.username}")
+        # Sanitize username before logging to prevent log injection
+        safe_username = sanitize_for_logging(login_data.username)
+        logger.warning(f"Login attempt for non-existent user: {safe_username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
@@ -68,14 +100,18 @@ async def login(
 
     # Check if user is active
     if not user.is_active:
-        logger.warning(f"Login attempt for inactive user: {login_data.username}")
+        # Use the stored username from database (already validated)
+        safe_username = sanitize_for_logging(user.username)
+        logger.warning(f"Login attempt for inactive user: {safe_username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Account is disabled"
         )
 
     # Verify password
     if not verify_password(login_data.password, user.password_hash):
-        logger.warning(f"Failed password for user: {login_data.username}")
+        # Use the stored username from database (already validated)
+        safe_username = sanitize_for_logging(user.username)
+        logger.warning(f"Failed password for user: {safe_username}")
         # Update failed login count
         user.failed_login_count = (user.failed_login_count or 0) + 1
         user.last_failed_login_at = datetime.now(UTC)
@@ -119,7 +155,9 @@ async def login(
         samesite="lax",
     )
 
-    logger.info(f"User {user.username} logged in successfully")
+    # Safe logging of successful login
+    safe_username = sanitize_for_logging(user.username)
+    logger.info(f"User {safe_username} logged in successfully")
 
     return LoginResponse(
         success=True,
@@ -211,7 +249,9 @@ async def change_password(
 
     await db.commit()
 
-    logger.info(f"Password changed for user {current_user.username}")
+    # Safe logging
+    safe_username = sanitize_for_logging(current_user.username)
+    logger.info(f"Password changed for user {safe_username}")
 
     return {"message": "Password changed successfully. Please log in again."}
 
@@ -260,7 +300,10 @@ async def create_user(
     await db.commit()
     await db.refresh(new_user)
 
-    logger.info(f"User {new_user.username} created by {admin_user.username}")
+    # Safe logging
+    safe_new_username = sanitize_for_logging(new_user.username)
+    safe_admin_username = sanitize_for_logging(admin_user.username)
+    logger.info(f"User {safe_new_username} created by {safe_admin_username}")
 
     return UserInfo(
         id=new_user.id,
@@ -314,7 +357,10 @@ async def create_api_key(
     await db.commit()
     await db.refresh(api_key)
 
-    logger.info(f"API key '{api_key.name}' created by user {current_user.username}")
+    # Safe logging
+    safe_key_name = sanitize_for_logging(api_key.name)
+    safe_username = sanitize_for_logging(current_user.username)
+    logger.info(f"API key '{safe_key_name}' created by user {safe_username}")
 
     return APIKeyResponse(
         api_key=plain_key,
@@ -387,7 +433,10 @@ async def revoke_api_key(
     api_key.revoke()
     await db.commit()
 
-    logger.info(f"API key '{api_key.name}' revoked by user {current_user.username}")
+    # Safe logging
+    safe_key_name = sanitize_for_logging(api_key.name)
+    safe_username = sanitize_for_logging(current_user.username)
+    logger.info(f"API key '{safe_key_name}' revoked by user {safe_username}")
 
     return {"message": "API key revoked successfully"}
 

@@ -5,7 +5,7 @@ Harbor Authentication Manager
 Central authentication management for users and API keys.
 """
 
-from datetime import UTC, datetime, timedelta  # Added timedelta import
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +21,36 @@ from app.utils.logging import get_logger
 
 
 logger = get_logger(__name__)
+
+
+def sanitize_for_logging(value: str) -> str:
+    """
+    Sanitize user input for safe logging.
+
+    Removes newlines and carriage returns to prevent log injection attacks.
+    Limits length to prevent excessive log entries.
+
+    Args:
+        value: The string to sanitize
+
+    Returns:
+        Sanitized string safe for logging
+    """
+    if not value:
+        return ""
+
+    # Remove newlines, carriage returns, and other control characters
+    sanitized = value.replace("\r", "").replace("\n", "").replace("\t", " ")
+
+    # Remove any other control characters
+    sanitized = "".join(char if ord(char) >= 32 else "" for char in sanitized)
+
+    # Limit length to prevent log flooding
+    max_length = 100
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length] + "..."
+
+    return sanitized
 
 
 class AuthenticationResult:
@@ -92,7 +122,8 @@ class AuthenticationManager:
         """
         # Check account lockout
         if self._is_account_locked(username):
-            logger.warning(f"Login attempt for locked account: {username}")
+            safe_username = sanitize_for_logging(username)
+            logger.warning(f"Login attempt for locked account: {safe_username}")
             return AuthenticationResult(
                 success=False,
                 error_message="Account temporarily locked due to too many failed attempts",
@@ -104,13 +135,10 @@ class AuthenticationManager:
         result = await db.execute(stmt)
         user = result.scalar_one_or_none()
 
-        print(
-            f"DEBUG: Found user: {user.username if user else 'None'} for username: {username}"
-        )
-
         if not user:
             self._record_failed_attempt(username)
-            logger.warning(f"Login attempt for non-existent user: {username}")
+            safe_username = sanitize_for_logging(username)
+            logger.warning(f"Login attempt for non-existent user: {safe_username}")
             return AuthenticationResult(
                 success=False,
                 error_message="Invalid username or password",
@@ -118,7 +146,8 @@ class AuthenticationManager:
 
         # Check if user is active
         if not user.is_active:
-            logger.warning(f"Login attempt for inactive user: {username}")
+            safe_username = sanitize_for_logging(username)
+            logger.warning(f"Login attempt for inactive user: {safe_username}")
             return AuthenticationResult(
                 success=False,
                 error_message="Account is disabled",
@@ -127,7 +156,8 @@ class AuthenticationManager:
         # Verify password
         if not verify_password(password, user.password_hash):
             self._record_failed_attempt(username)
-            logger.warning(f"Failed login attempt for user: {username}")
+            safe_username = sanitize_for_logging(username)
+            logger.warning(f"Failed login attempt for user: {safe_username}")
 
             # Update failed login count in database
             user.failed_login_count = (user.failed_login_count or 0) + 1
@@ -144,10 +174,10 @@ class AuthenticationManager:
 
         # Check if MFA is enabled (future feature)
         if user.mfa_enabled:
-            logger.info(f"MFA required for user: {username}")
+            safe_username = sanitize_for_logging(username)
+            logger.info(f"MFA required for user: {safe_username}")
             # TODO: Implement MFA in M7+
-            # For now, just log and continue
-            pass
+            # For now, MFA is behind a feature flag and not implemented
 
         # Create session
         session = self.session_manager.create_session(
@@ -166,7 +196,8 @@ class AuthenticationManager:
         user.failed_login_count = 0  # Reset failed count
         await db.commit()
 
-        logger.info(f"User {username} logged in successfully")
+        safe_username = sanitize_for_logging(username)
+        logger.info(f"User {safe_username} logged in successfully")
 
         return AuthenticationResult(
             success=True,
@@ -219,21 +250,21 @@ class AuthenticationManager:
 
         # Check expiration
         if api_key_record.expires_at and datetime.now(UTC) > api_key_record.expires_at:
-            logger.warning(f"Expired API key used: {api_key_record.name}")
+            safe_key_name = sanitize_for_logging(api_key_record.name)
+            logger.warning(f"Expired API key used: {safe_key_name}")
             return AuthenticationResult(
                 success=False,
                 error_message="API key has expired",
             )
 
-        # Get associated user (FIX: use separate variable name for user query)
+        # Get associated user
         user_stmt = select(User).where(User.id == api_key_record.created_by_user_id)
         user_result = await db.execute(user_stmt)
         user = user_result.scalar_one_or_none()
 
         if not user or not user.is_active:
-            logger.warning(
-                f"API key associated with invalid user: {api_key_record.name}"
-            )
+            safe_key_name = sanitize_for_logging(api_key_record.name)
+            logger.warning(f"API key associated with invalid user: {safe_key_name}")
             return AuthenticationResult(
                 success=False,
                 error_message="API key is invalid",
@@ -245,11 +276,12 @@ class AuthenticationManager:
         api_key_record.usage_count = (api_key_record.usage_count or 0) + 1
         await db.commit()
 
-        logger.info(f"API key {api_key_record.name} authenticated successfully")
+        safe_key_name = sanitize_for_logging(api_key_record.name)
+        logger.info(f"API key {safe_key_name} authenticated successfully")
 
         return AuthenticationResult(
             success=True,
-            user=user,  # Now correctly typed as User
+            user=user,
             api_key=api_key_record,
         )
 
