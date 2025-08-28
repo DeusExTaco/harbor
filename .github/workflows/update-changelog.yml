@@ -1,0 +1,284 @@
+# .github/workflows/update-changelog.yml
+name: Update Changelog
+
+on:
+  workflow_run:
+    workflows: ["Auto Version Bump"]
+    types: [completed]
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to add to changelog'
+        required: true
+        type: string
+      release-type:
+        description: 'Type of release (patch, minor, major, alpha, beta)'
+        required: false
+        default: 'alpha'
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-changelog:
+    name: Update CHANGELOG.md
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_call'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          ref: develop  # Always update on develop branch
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Get version information
+        id: version-info
+        run: |
+          # If called directly with version input, use that
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            # Otherwise, extract from app/__init__.py
+            VERSION=$(python -c "
+          import re
+          with open('app/__init__.py', 'r') as f:
+              content = f.read()
+              match = re.search(r'__version__ = [\"']([^\"']+)[\"']', content)
+              if match:
+                  print(match.group(1))
+          ")
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+
+          # Determine if this is a new section or update to unreleased
+          if grep -q "## \[$VERSION\]" CHANGELOG.md 2>/dev/null; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get recent commits for changelog
+        id: get-commits
+        run: |
+          # Get commits since last tag or last 10 commits
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -n "$LAST_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"- %s" $LAST_TAG..HEAD --no-merges | grep -v "^\- \[skip ci\]" | head -20)
+          else
+            COMMITS=$(git log --pretty=format:"- %s" -10 --no-merges | grep -v "^\- \[skip ci\]" | head -10)
+          fi
+
+          # Categorize commits
+          ADDED=""
+          CHANGED=""
+          FIXED=""
+          SECURITY=""
+
+          while IFS= read -r line; do
+            if [[ $line == *"Add"* ]] || [[ $line == *"add"* ]] || [[ $line == *"feat"* ]] || [[ $line == *"Feat"* ]]; then
+              ADDED="${ADDED}${line}\n"
+            elif [[ $line == *"Change"* ]] || [[ $line == *"change"* ]] || [[ $line == *"Update"* ]] || [[ $line == *"update"* ]]; then
+              CHANGED="${CHANGED}${line}\n"
+            elif [[ $line == *"Fix"* ]] || [[ $line == *"fix"* ]] || [[ $line == *"Bug"* ]] || [[ $line == *"bug"* ]]; then
+              FIXED="${FIXED}${line}\n"
+            elif [[ $line == *"Security"* ]] || [[ $line == *"security"* ]] || [[ $line == *"CVE"* ]]; then
+              SECURITY="${SECURITY}${line}\n"
+            else
+              CHANGED="${CHANGED}${line}\n"
+            fi
+          done <<< "$COMMITS"
+
+          # Save categorized commits to files
+          echo -e "$ADDED" > commits_added.txt
+          echo -e "$CHANGED" > commits_changed.txt
+          echo -e "$FIXED" > commits_fixed.txt
+          echo -e "$SECURITY" > commits_security.txt
+
+      - name: Update CHANGELOG.md
+        run: |
+          VERSION="${{ steps.version-info.outputs.version }}"
+          DATE="${{ steps.version-info.outputs.date }}"
+          EXISTS="${{ steps.version-info.outputs.exists }}"
+
+          # Create Python script to update changelog
+          cat > update_changelog.py << 'PYTHON_SCRIPT'
+          import re
+          import sys
+          from pathlib import Path
+
+          version = sys.argv[1]
+          date = sys.argv[2]
+          exists = sys.argv[3] == 'true'
+
+          # Read commit categories
+          def read_commits(filename):
+              if Path(filename).exists():
+                  with open(filename, 'r') as f:
+                      content = f.read().strip()
+                      if content and content != "-":
+                          return [line for line in content.split('\n') if line.strip() and line != "-"]
+              return []
+
+          added = read_commits('commits_added.txt')
+          changed = read_commits('commits_changed.txt')
+          fixed = read_commits('commits_fixed.txt')
+          security = read_commits('commits_security.txt')
+
+          # Read current changelog
+          with open('CHANGELOG.md', 'r') as f:
+              content = f.read()
+
+          # Create new version section
+          new_section = f"\n## [{version}] - {date}\n"
+
+          if added:
+              new_section += "\n### Added\n"
+              for item in added:
+                  new_section += f"{item}\n"
+
+          if changed:
+              new_section += "\n### Changed\n"
+              for item in changed:
+                  new_section += f"{item}\n"
+
+          if fixed:
+              new_section += "\n### Fixed\n"
+              for item in fixed:
+                  new_section += f"{item}\n"
+
+          if security:
+              new_section += "\n### Security\n"
+              for item in security:
+                  new_section += f"{item}\n"
+
+          # If version already exists, don't add it again
+          if exists:
+              print(f"Version {version} already exists in CHANGELOG")
+              sys.exit(0)
+
+          # Find the position to insert (after Unreleased section)
+          unreleased_pattern = r'## \[Unreleased\].*?(?=\n## \[|$)'
+          match = re.search(unreleased_pattern, content, re.DOTALL)
+
+          if match:
+              # Insert after Unreleased section
+              insert_pos = match.end()
+              content = content[:insert_pos] + new_section + content[insert_pos:]
+
+              # Clear the Unreleased section
+              unreleased_section = """## [Unreleased]
+
+          ### Added
+          -
+
+          ### Changed
+          -
+
+          ### Fixed
+          -
+
+          ### Security
+          -
+          """
+              content = re.sub(unreleased_pattern, unreleased_section, content, count=1, flags=re.DOTALL)
+          else:
+              # No Unreleased section found, add after header
+              lines = content.split('\n')
+              for i, line in enumerate(lines):
+                  if line.startswith('## '):
+                      # Insert before first version section
+                      lines.insert(i, new_section)
+                      break
+              content = '\n'.join(lines)
+
+          # Update the comparison links at the bottom
+          # Extract base version (without -alpha.X)
+          base_version = re.match(r'(\d+\.\d+\.\d+)', version).group(1) if re.match(r'(\d+\.\d+\.\d+)', version) else version
+
+          # Find the links section and update it
+          if '[Unreleased]:' in content:
+              # Update the Unreleased comparison link
+              content = re.sub(
+                  r'\[Unreleased\]: https://github\.com/[^/]+/[^/]+/compare/[^.]+\.\.\.HEAD',
+                  f'[Unreleased]: https://github.com/DeusExTaco/harbor/compare/v{version}...HEAD',
+                  content
+              )
+
+          # Add new version comparison link if it doesn't exist
+          if f'[{version}]:' not in content:
+              # Find the position to add the new link (after Unreleased link)
+              lines = content.split('\n')
+              for i, line in enumerate(lines):
+                  if '[Unreleased]:' in line:
+                      # Find previous version for comparison
+                      prev_version = None
+                      for j in range(i+1, len(lines)):
+                          match = re.match(r'\[([^\]]+)\]:', lines[j])
+                          if match:
+                              prev_version = match.group(1)
+                              break
+
+                      if prev_version:
+                          new_link = f'[{version}]: https://github.com/DeusExTaco/harbor/compare/v{prev_version}...v{version}'
+                      else:
+                          new_link = f'[{version}]: https://github.com/DeusExTaco/harbor/releases/tag/v{version}'
+
+                      lines.insert(i+1, new_link)
+                      break
+              content = '\n'.join(lines)
+
+          # Write updated changelog
+          with open('CHANGELOG.md', 'w') as f:
+              f.write(content)
+
+          print(f"✅ Updated CHANGELOG.md with version {version}")
+          PYTHON_SCRIPT
+
+          python update_changelog.py "$VERSION" "$DATE" "$EXISTS"
+
+      - name: Commit changelog update
+        run: |
+          VERSION="${{ steps.version-info.outputs.version }}"
+
+          # Check if there are changes to commit
+          if git diff --quiet CHANGELOG.md; then
+            echo "No changes to CHANGELOG.md"
+            exit 0
+          fi
+
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          git add CHANGELOG.md
+          git commit -m "[skip ci] Update CHANGELOG.md for version $VERSION
+
+          Automated changelog update for version $VERSION"
+
+          git push
+
+      - name: Create changelog summary
+        run: |
+          VERSION="${{ steps.version-info.outputs.version }}"
+
+          echo "# 📝 Changelog Updated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔄 Version: $VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The CHANGELOG.md has been automatically updated with recent commits." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📋 Update Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Date**: ${{ steps.version-info.outputs.date }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: develop" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ✅ Successfully updated" >> $GITHUB_STEP_SUMMARY

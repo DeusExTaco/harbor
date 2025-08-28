@@ -8,123 +8,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Initial project structure following Harbor foundational documents
-- FastAPI-based web framework with automatic OpenAPI documentation
-- Zero-configuration deployment for home labs
-- SQLite database with automatic migrations
-- Profile-based configuration (homelab, development, production)
-- Comprehensive health checks and monitoring endpoints
-- Docker container health checking
-- Complete CI/CD pipeline with multi-stage testing
-- Security scanning and vulnerability detection
-- Development environment with hot reload
-- Comprehensive test suite with unit and integration tests
-- Release automation with semantic versioning
+-
 
 ### Changed
-- N/A (initial development)
-
-### Deprecated
-- N/A (initial development)
-
-### Removed
-- N/A (initial development)
+-
 
 ### Fixed
-- N/A (initial development)
+-
 
 ### Security
-- Implemented bandit security scanning in CI/CD pipeline
-- Added CodeQL security analysis
-- Dependency vulnerability scanning with pip-audit and safety
-- Container security scanning with Trivy
+-
 
----
+## [0.1.0-alpha.3] - 2024-XX-XX
 
-## Release Timeline
+### Added
+- Automated version bumping workflow for develop branch
+- Version synchronization between `app/__init__.py` and `pyproject.toml`
+- Simplified GitHub release process with auto-generated notes
 
-Harbor follows a milestone-based development approach:
+### Changed
+- Docker build workflow now only triggers via main CI/CD pipeline
+- Version detection now uses `app/__init__.py` as source of truth
+- Release notes generation simplified for M0 milestone
 
-### M0 - Foundation (v0.1.x) - ✅ Current
-**Focus**: Project infrastructure, CI/CD, basic application structure
-- Complete CI/CD pipeline with automated testing and security scanning
-- Development-friendly tooling and documentation
-- Production-ready Docker images and deployment configurations
-- Extensible architecture ready for feature development
+### Fixed
+- Eliminated duplicate Docker builds from multiple triggers
+- Version consistency between configuration files
 
-### M1 - Discovery (v0.2.x) - 🚧 Planned
-**Focus**: Container discovery and registry integration
-- Automatic container discovery with change detection
-- Multi-registry support (Docker Hub, GHCR, private registries)
-- Intelligent caching and rate limiting
-- Container specification analysis and tracking
+## [0.1.0-alpha.2] - 2024-01-XX
 
-### M2 - Updates (v0.3.x) - 📋 Planned
-**Focus**: Safe update engine with rollback capability
-- Digest-based updates with atomic cutover
-- Health verification before and after updates
-- Automatic rollback on failure
-- Image management and cleanup
+### Added
+- Comprehensive CI/CD pipeline with multi-stage testing
+- Docker multi-registry support (Docker Hub and GHCR)
+- Security scanning with CodeQL, Trivy, and dependency checks
+- Python 3.11, 3.12, and 3.13 compatibility testing
+- Automated release creation for tagged versions
 
-### M3 - Automation (v0.4.x) - 📋 Planned
-**Focus**: Scheduling and comprehensive web interface
-- Advanced scheduling with cron and interval support
-- Complete web UI for all operations
-- Real-time progress tracking and log streaming
-- User experience enhancements
+### Changed
+- Restructured project to follow Harbor architecture specifications
+- Updated configuration system with deployment profiles
+- Enhanced error handling and logging
 
-### M4 - Observability (v0.5.x) - 📋 Planned
-**Focus**: Monitoring, metrics, and alerting
-- Prometheus metrics and Grafana dashboards
-- Comprehensive health monitoring
-- Alerting and notification system
-- Performance optimization
+### Fixed
+- Configuration loading issues in different environments
+- Docker build caching for faster CI/CD runs
 
-### M5 - Production (v0.6.x) - 📋 Planned
-**Focus**: Security hardening and enterprise features
-- Multi-user authentication and RBAC
-- Enhanced security and audit capabilities
-- High availability and scaling features
-- Performance optimization
+## [0.1.0-alpha.1] - 2024-01-XX
 
-### M6 - Release (v1.0.x) - 📋 Planned
-**Focus**: Community launch and ecosystem integration
-- Complete documentation and tutorials
-- Migration tools and guides
-- Community building and support
-- Ecosystem integrations
+### Added
+- Initial M0 Foundation implementation
+- FastAPI-based web framework with automatic OpenAPI documentation
+- SQLite database with SQLAlchemy ORM and Alembic migrations
+- Profile-based configuration (homelab, development, production)
+- Basic authentication system with session management
+- Comprehensive health check and monitoring endpoints
+- Docker and Docker Compose deployment configurations
+- GitHub Actions CI/CD pipeline foundation
+- Project structure following Harbor specifications
 
----
+### Changed
+- N/A (Initial release)
+
+### Fixed
+- N/A (Initial release)
+
+### Security
+- Implemented secure password hashing with Argon2id
+- Added CSRF protection for web interface
+- Configured security headers and rate limiting
 
 ## Version History
 
-### [0.1.0] - TBD
-- Initial release completing M0 (Foundation) milestone
-- See release notes for detailed feature list
+- `0.1.0-alpha.X` - M0 Foundation Phase (Current)
+- `0.2.0-alpha.X` - M1 Container Discovery (Planned)
+- `0.3.0-alpha.X` - M2 Update Engine (Planned)
+- `0.4.0-alpha.X` - M3 Automation (Planned)
+- `0.5.0-beta.X` - M4 Observability (Planned)
+- `0.6.0-beta.X` - M5 Production Ready (Planned)
+- `1.0.0` - M6 Release (Planned)
 
----
-
-## Contributing
-
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
-
-## Versioning
-
-We use [Semantic Versioning](http://semver.org/) for versioning. For available versions, see the [tags on this repository](https://github.com/DeusExTaco/harbor/tags).
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Support
-
-- 📚 Documentation: https://harbor-docs.dev
-- 🐛 Bug Reports: [GitHub Issues](https://github.com/DeusExTaco/harbor/issues)
-- 💬 Discussions: [GitHub Discussions](https://github.com/DeusExTaco/harbor/discussions)
-- 📧 Email: harbor@example.com
-
-## Acknowledgments
-
-- Thanks to all contributors who help make Harbor better
-- Inspired by existing container update tools like Watchtower and Ouroboros
-- Built with modern Python tools and best practices
+[Unreleased]: https://github.com/DeusExTaco/harbor/compare/v0.1.0-alpha.3...HEAD
+[0.1.0-alpha.3]: https://github.com/DeusExTaco/harbor/compare/v0.1.0-alpha.2...v0.1.0-alpha.3
+[0.1.0-alpha.2]: https://github.com/DeusExTaco/harbor/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
+[0.1.0-alpha.1]: https://github.com/DeusExTaco/harbor/releases/tag/v0.1.0-alpha.1
