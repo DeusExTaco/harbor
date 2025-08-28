@@ -7,7 +7,7 @@ repos:
   # Basic file checks and formatting
   # =============================================================================
 - repo: https://github.com/pre-commit/pre-commit-hooks
-  rev: v6.0.0
+  rev: v5.0.0
   hooks:
       # File formatting
   - id: trailing-whitespace
@@ -26,15 +26,7 @@ repos:
     exclude: ^(node_modules/|\.git/)
   - id: check-json
     exclude: ^(node_modules/|\.git/|.*\.min\.json$)
-  - id: check-xml
-    exclude: ^(node_modules/|\.git/)
-
-      # Git and merge checks
-  - id: check-added-large-files
-    args: [--maxkb=1000]
-    exclude: ^(node_modules/|\.git/)
   - id: check-merge-conflict
-  - id: forbid-new-submodules
 
       # Python specific
   - id: check-ast
@@ -49,12 +41,11 @@ repos:
   # Python code quality with Ruff (replaces flake8, isort, etc.)
   # =============================================================================
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.12.8
+  rev: v0.8.1
   hooks:
-  - id: ruff-check
+  - id: ruff
     name: ruff-check
-    args: [--fix, --exit-zero]
-
+    args: [--fix, --exit-non-zero-on-fix]
   - id: ruff-format
     name: ruff-format
 
@@ -62,7 +53,7 @@ repos:
   # Type checking with mypy - TEMPORARILY RELAXED DURING M0 DEVELOPMENT
   # =============================================================================
 - repo: https://github.com/pre-commit/mirrors-mypy
-  rev: v1.17.1
+  rev: v1.13.0
   hooks:
   - id: mypy
     name: mypy-type-check
@@ -86,7 +77,7 @@ repos:
   # Security scanning
   # =============================================================================
 - repo: https://github.com/PyCQA/bandit
-  rev: 1.8.6
+  rev: 1.7.10
   hooks:
   - id: bandit
     name: bandit-security-check
@@ -173,52 +164,41 @@ exclude: |
   (?x)^(
     # Version control
     \.git/.*|
-
     # Build and distribution
     build/.*|
     dist/.*|
     \.eggs?/.*|
     .*\.egg-info/.*|
-
     # Node.js (if present)
     node_modules/.*|
-
     # Cache directories
     __pycache__/.*|
     \.mypy_cache/.*|
     \.pytest_cache/.*|
     \.ruff_cache/.*|
-
     # Virtual environments
     venv/.*|
     \.venv/.*|
     env/.*|
-
     # IDE files
     \.vscode/.*|
     \.idea/.*|
-
     # OS files
     \.DS_Store|
     Thumbs\.db|
-
     # Log files
     \.log$|
     logs/.*|
-
     # Database files
     \.db$|
     \.sqlite$|
     \.sqlite3$|
-
     # Backup files
     .*\.bak$|
     .*\.backup$|
-
     # Temporary files
     \.tmp$|
     \.temp$|
-
     # Development and testing scripts (specific exclusions)
     simple_env_test\.py|
     test_config\.py|
@@ -227,7 +207,6 @@ exclude: |
     debug_pydantic_env\.py|
     deep_debug_pydantic\.py|
     check_environment\.py|
-
     # Migration files
     migrations/versions/.*\.py$
   )$

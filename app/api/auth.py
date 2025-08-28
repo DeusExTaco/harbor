@@ -147,7 +147,7 @@ async def login(
         max_age = max_age * 4  # Extend for remember me
 
     response.set_cookie(
-        key="harbor_session",
+        key="harbor_session",  # pragma: allowlist secret
         value=session.session_id,
         max_age=max_age,
         httponly=True,
@@ -467,7 +467,7 @@ async def refresh_session(
     # Update cookie expiration
     settings = get_settings()
     response.set_cookie(
-        key="harbor_session",
+        key="harbor_session",  # pragma: allowlist secret
         value=refreshed_session.session_id,
         max_age=settings.security.session_timeout_hours * 3600,
         httponly=True,

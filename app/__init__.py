@@ -8,6 +8,9 @@ Copyright (c) 2024 Harbor Contributors
 Licensed under the MIT License
 """
 
+from typing import TYPE_CHECKING, Any
+
+
 __version__ = "0.1.0-alpha.2"
 __description__ = "Automated Docker container updates for home labs and enterprises"
 __author__ = "Harbor Contributors"
@@ -32,7 +35,7 @@ __status__ = "Pre-Alpha"
 # Import key components for easy access
 try:
     from app.config import (
-        DeploymentProfile,
+        DeploymentProfile,  # noqa: F401
         get_config_summary,
         get_settings,
         is_development,
@@ -43,12 +46,36 @@ try:
     CONFIG_AVAILABLE = True
 except ImportError:
     CONFIG_AVAILABLE = False
-    # Don't try to define DeploymentProfile at all - just leave it undefined
-    get_settings = lambda: None
-    get_config_summary = lambda: None
-    is_development = lambda: False
-    is_production = lambda: False
-    is_homelab = lambda: True
+
+    if TYPE_CHECKING:
+        # For type checking, import the actual types
+        from app.config import HarborSettings
+    else:
+        # At runtime, create a dummy class
+        class HarborSettings:  # type: ignore[no-redef]
+            pass
+
+    # Define fallback functions with matching signatures
+    def get_settings() -> Any:  # type: ignore[misc]
+        """Fallback function when config is not available."""
+        return None
+
+    def get_config_summary() -> dict[str, Any]:
+        """Fallback function when config is not available."""
+        return {}
+
+    def is_development() -> bool:
+        """Fallback function when config is not available."""
+        return False
+
+    def is_production() -> bool:
+        """Fallback function when config is not available."""
+        return False
+
+    def is_homelab() -> bool:
+        """Fallback function when config is not available."""
+        return True
+
 
 # Export public API
 __all__ = [
@@ -78,7 +105,7 @@ def get_version() -> str:
     return __version__
 
 
-def get_app_info() -> dict:
+def get_app_info() -> dict[str, Any]:
     """Get application information."""
     return {
         "name": "Harbor Container Updater",
