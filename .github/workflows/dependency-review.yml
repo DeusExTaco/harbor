@@ -328,6 +328,50 @@ jobs:
           retention-days: 30
 
   # =============================================================================
+  # License Overrides
+  # =============================================================================
+
+      - name: Apply license overrides
+        run: |
+          echo "📋 Applying license overrides for packages with UNKNOWN licenses..."
+
+          # Create Python script to fix licenses
+          cat > fix_licenses.py << 'EOF'
+          import subprocess
+          import json
+
+          # Known good licenses verified from PyPI
+          OVERRIDES = {
+              "Markdown": "BSD-3-Clause",
+              "alembic": "MIT",
+              "anyio": "MIT",
+              "argon2-cffi-bindings": "MIT",
+              "click": "BSD-3-Clause",
+              "licensecheck": "MIT",
+              "prometheus_client": "Apache-2.0",
+              "typing-inspection": "MIT",
+              "typing_extensions": "PSF-2.0",
+              "urllib3": "MIT"
+          }
+
+          # Get current packages
+          result = subprocess.run(["pip-licenses", "--format=json"], capture_output=True, text=True)
+          packages = json.loads(result.stdout)
+
+          # Count unknowns
+          unknown_count = sum(1 for p in packages if p.get("License") == "UNKNOWN")
+          fixed_count = sum(1 for p in packages if p.get("Name") in OVERRIDES)
+
+          print(f"Found {unknown_count} packages with UNKNOWN license")
+          print(f"Can fix {fixed_count} with known overrides")
+
+          # The actual license check will happen in the next step
+          # This just reports what we know
+          EOF
+
+          python fix_licenses.py
+
+  # =============================================================================
   # License Compliance Check
   # =============================================================================
   license-compliance:

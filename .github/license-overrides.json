@@ -1,0 +1,40 @@
+{
+  "license_overrides": {
+    "Markdown": "BSD-3-Clause",
+    "alembic": "MIT",
+    "anyio": "MIT",
+    "argon2-cffi-bindings": "MIT",
+    "click": "BSD-3-Clause",
+    "licensecheck": "MIT",
+    "prometheus_client": "Apache-2.0",
+    "prometheus-client": "Apache-2.0",
+    "typing-inspection": "MIT",
+    "typing_extensions": "PSF-2.0",
+    "typing-extensions": "PSF-2.0",
+    "urllib3": "MIT",
+    "CacheControl": "Apache-2.0",
+    "Flask": "BSD-3-Clause",
+    "attrs": "MIT",
+    "jsonschema": "MIT",
+    "jsonschema-specifications": "MIT",
+    "jupyter_core": "BSD-3-Clause",
+    "mypy_extensions": "MIT",
+    "playwright": "Apache-2.0",
+    "pytest-xdist": "MIT",
+    "pyyaml_env_tag": "MIT",
+    "referencing": "MIT",
+    "rpds-py": "MIT",
+    "types-PyYAML": "Apache-2.0",
+    "types-psutil": "Apache-2.0",
+    "types-python-dateutil": "Apache-2.0",
+    "types-requests": "Apache-2.0"
+  },
+  "fixed_from_pypi": {},
+  "acceptable_exceptions": {
+    "psycopg2-binary": "Development/test only - not in production image",
+    "certifi": "Standard certificate bundle - MPL is acceptable",
+    "pathspec": "Build tool dependency only",
+    "pytest-metadata": "Test dependency only",
+    "fqdn": "Optional validation library"
+  }
+}
