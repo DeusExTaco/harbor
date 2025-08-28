@@ -1,0 +1,202 @@
+# .github/workflows/auto-pr.yml
+name: Auto Create PR
+
+on:
+  push:
+    branches:
+      - 'feature/*'
+      - 'fix/*'
+      - 'docs/*'
+      - 'chore/*'
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  create-pr:
+    name: Create Pull Request
+    runs-on: ubuntu-latest
+    # Only create PR if one doesn't already exist
+    if: github.event.created == true || github.event.forced == true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get branch info
+        id: branch-info
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+          echo "branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
+
+          # Extract branch type and description
+          if [[ $BRANCH_NAME == feature/* ]]; then
+            TYPE="✨ New feature"
+            PREFIX="feat"
+          elif [[ $BRANCH_NAME == fix/* ]]; then
+            TYPE="🐛 Bug fix"
+            PREFIX="fix"
+          elif [[ $BRANCH_NAME == docs/* ]]; then
+            TYPE="📚 Documentation"
+            PREFIX="docs"
+          elif [[ $BRANCH_NAME == chore/* ]]; then
+            TYPE="🔧 Maintenance"
+            PREFIX="chore"
+          else
+            TYPE="🔧 Other"
+            PREFIX="other"
+          fi
+
+          # Extract description from branch name (everything after the /)
+          DESCRIPTION="${BRANCH_NAME#*/}"
+          # Replace hyphens with spaces and capitalize
+          DESCRIPTION=$(echo "$DESCRIPTION" | sed 's/-/ /g' | sed 's/\b\(.\)/\u\1/g')
+
+          echo "type=$TYPE" >> $GITHUB_OUTPUT
+          echo "prefix=$PREFIX" >> $GITHUB_OUTPUT
+          echo "description=$DESCRIPTION" >> $GITHUB_OUTPUT
+
+      - name: Get commit information
+        id: commits
+        run: |
+          # Get commit count and messages
+          COMMIT_COUNT=$(git rev-list --count origin/develop..HEAD)
+          echo "count=$COMMIT_COUNT" >> $GITHUB_OUTPUT
+
+          # Get commit messages for the PR body
+          COMMITS=$(git log --pretty=format:"- %s" origin/develop..HEAD)
+          echo "messages<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMITS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Check if PR already exists
+        id: check-pr
+        run: |
+          # Check if a PR already exists for this branch
+          PR_EXISTS=$(gh pr list --head "${{ steps.branch-info.outputs.branch }}" --json number --jq '.[0].number' || echo "")
+
+          if [ -n "$PR_EXISTS" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "pr_number=$PR_EXISTS" >> $GITHUB_OUTPUT
+            echo "PR #$PR_EXISTS already exists for this branch"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "No PR exists yet for this branch"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Pull Request
+        if: steps.check-pr.outputs.exists == 'false'
+        id: create-pr
+        run: |
+          # Determine target branch based on current branch
+          if [[ "${{ steps.branch-info.outputs.branch }}" == feature/M0-* ]]; then
+            TARGET="develop"
+          elif [[ "${{ steps.branch-info.outputs.branch }}" == fix/* ]]; then
+            TARGET="develop"
+          else
+            TARGET="develop"
+          fi
+
+          # Create PR title
+          PR_TITLE="${{ steps.branch-info.outputs.prefix }}: ${{ steps.branch-info.outputs.description }}"
+
+          # Create PR body
+          cat > pr-body.md << 'EOF'
+          # Pull Request
+
+          ## What does this PR do?
+          ${{ steps.branch-info.outputs.description }}
+
+          ## Type of change
+          - [x] ${{ steps.branch-info.outputs.type }}
+
+          ## Commits in this PR
+          ${{ steps.commits.outputs.messages }}
+
+          ## Testing
+          - [ ] Tests pass locally
+          - [ ] CI/CD pipeline passes
+
+          ## Notes
+          - **Branch:** `${{ steps.branch-info.outputs.branch }}`
+          - **Commits:** ${{ steps.commits.outputs.count }}
+          - **Target:** `TARGET_BRANCH`
+          - **Version:** Will auto-increment on merge to develop
+
+          ---
+          *This PR was automatically created. Please review and update as needed.*
+          EOF
+
+          # Replace TARGET_BRANCH placeholder
+          sed -i "s/TARGET_BRANCH/$TARGET/g" pr-body.md
+
+          # Create the PR
+          PR_URL=$(gh pr create \
+            --title "$PR_TITLE" \
+            --body-file pr-body.md \
+            --base "$TARGET" \
+            --head "${{ steps.branch-info.outputs.branch }}" \
+            --draft)
+
+          echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+          echo "✅ Created PR: $PR_URL"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add labels to PR
+        if: steps.check-pr.outputs.exists == 'false' && steps.create-pr.outputs.pr_url != ''
+        run: |
+          # Extract PR number from URL
+          PR_NUMBER=$(echo "${{ steps.create-pr.outputs.pr_url }}" | grep -oE '[0-9]+$')
+
+          # Add appropriate labels based on branch type
+          if [[ "${{ steps.branch-info.outputs.branch }}" == feature/* ]]; then
+            gh pr edit $PR_NUMBER --add-label "enhancement"
+          elif [[ "${{ steps.branch-info.outputs.branch }}" == fix/* ]]; then
+            gh pr edit $PR_NUMBER --add-label "bug"
+          elif [[ "${{ steps.branch-info.outputs.branch }}" == docs/* ]]; then
+            gh pr edit $PR_NUMBER --add-label "documentation"
+          elif [[ "${{ steps.branch-info.outputs.branch }}" == chore/* ]]; then
+            gh pr edit $PR_NUMBER --add-label "maintenance"
+          fi
+
+          # Add milestone if M0
+          if [[ "${{ steps.branch-info.outputs.branch }}" == */M0-* ]]; then
+            gh pr edit $PR_NUMBER --add-label "M0-foundation"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post comment with next steps
+        if: steps.check-pr.outputs.exists == 'false' && steps.create-pr.outputs.pr_url != ''
+        run: |
+          PR_NUMBER=$(echo "${{ steps.create-pr.outputs.pr_url }}" | grep -oE '[0-9]+$')
+
+          gh pr comment $PR_NUMBER --body "## 🤖 Auto-PR Created!
+
+          This PR was automatically created when you pushed to \`${{ steps.branch-info.outputs.branch }}\`.
+
+          ### Next Steps:
+          1. Review the PR description and update if needed
+          2. Wait for CI/CD checks to pass
+          3. Mark as **Ready for review** when complete (it's currently a draft)
+          4. Request reviewers if needed
+
+          ### What happens when merged:
+          - ✅ Version will auto-increment (alpha.X → alpha.X+1)
+          - ✅ CHANGELOG will be updated automatically
+          - ✅ Docker images will be built and pushed
+          - ✅ All files will stay in sync
+
+          ### Quick Actions:
+          - Convert to ready: \`gh pr ready $PR_NUMBER\`
+          - Add reviewer: \`gh pr edit $PR_NUMBER --add-reviewer USERNAME\`
+          - Merge when ready: \`gh pr merge $PR_NUMBER --squash\`"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

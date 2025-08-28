@@ -1,0 +1,422 @@
+# .github/workflows/version-bump.yml
+name: Auto Version Bump
+
+on:
+  push:
+    branches: [develop]
+    paths-ignore:
+      - '**.md'
+      - '.github/**'
+      - 'docs/**'
+      - 'examples/**'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  version-bump:
+    name: Bump Alpha Version
+    runs-on: ubuntu-latest
+    # Only run on develop branch pushes (including merges from feature branches)
+    if: github.ref == 'refs/heads/develop'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Get current version
+        id: current-version
+        run: |
+          # Extract current version from app/__init__.py
+          if [ -f "app/__init__.py" ]; then
+            CURRENT_VERSION=$(python -c "
+          import re
+          with open('app/__init__.py', 'r') as f:
+              content = f.read()
+              match = re.search(r'__version__ = [\"']([^\"']+)[\"']', content)
+              if match:
+                  print(match.group(1))
+          ")
+            echo "Current version: $CURRENT_VERSION"
+            echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "Error: app/__init__.py not found"
+            exit 1
+          fi
+
+      - name: Calculate new version
+        id: new-version
+        run: |
+          CURRENT="${{ steps.current-version.outputs.current }}"
+
+          # Parse the version components
+          if [[ $CURRENT =~ ^([0-9]+\.[0-9]+\.[0-9]+)-alpha\.([0-9]+)$ ]]; then
+            BASE_VERSION="${BASH_REMATCH[1]}"
+            ALPHA_NUM="${BASH_REMATCH[2]}"
+
+            # Increment alpha number
+            NEW_ALPHA_NUM=$((ALPHA_NUM + 1))
+            NEW_VERSION="${BASE_VERSION}-alpha.${NEW_ALPHA_NUM}"
+
+            echo "New version: $NEW_VERSION"
+            echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "base=$BASE_VERSION" >> $GITHUB_OUTPUT
+            echo "alpha=$NEW_ALPHA_NUM" >> $GITHUB_OUTPUT
+          else
+            echo "Error: Version format not recognized: $CURRENT"
+            echo "Expected format: X.Y.Z-alpha.N"
+            exit 1
+          fi
+
+      - name: Update version in app/__init__.py
+        run: |
+          NEW_VERSION="${{ steps.new-version.outputs.new }}"
+
+          # Update app/__init__.py
+          python -c "
+          import re
+
+          with open('app/__init__.py', 'r') as f:
+              content = f.read()
+
+          # Update version
+          content = re.sub(
+              r'__version__ = [\"'][^\"']+[\"']',
+              f'__version__ = \"{NEW_VERSION}\"',
+              content
+          )
+
+          with open('app/__init__.py', 'w') as f:
+              f.write(content)
+
+          print(f'Updated app/__init__.py to version {NEW_VERSION}')
+          "
+
+      - name: Update version in pyproject.toml
+        run: |
+          NEW_VERSION="${{ steps.new-version.outputs.new }}"
+
+          # Update pyproject.toml
+          python -c "
+          import re
+
+          with open('pyproject.toml', 'r') as f:
+              content = f.read()
+
+          # Update version
+          content = re.sub(
+              r'^version = \"[^\"]+\"',
+              f'version = \"{NEW_VERSION}\"',
+              content,
+              flags=re.MULTILINE
+          )
+
+          with open('pyproject.toml', 'w') as f:
+              f.write(content)
+
+          print(f'Updated pyproject.toml to version {NEW_VERSION}')
+          "
+
+      - name: Get recent commits for changelog
+        id: get-commits
+        run: |
+          # Get the last tag for comparison
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          # Get commits since last tag or last version bump commit
+          if [ -n "$LAST_TAG" ]; then
+            echo "Getting commits since tag: $LAST_TAG"
+            COMMITS=$(git log --pretty=format:"%s" $LAST_TAG..HEAD --no-merges | grep -v "^\[skip ci\]" | head -20)
+          else
+            # Get last 10 commits excluding version bumps
+            echo "No tags found, getting recent commits"
+            COMMITS=$(git log --pretty=format:"%s" -15 --no-merges | grep -v "^\[skip ci\]" | grep -v "^Bump version" | head -10)
+          fi
+
+          # Save commits for changelog update
+          echo "$COMMITS" > recent_commits.txt
+
+          # Count commits by type for summary
+          FEATURE_COUNT=$(echo "$COMMITS" | grep -ciE "(add|feat|feature)" || echo 0)
+          FIX_COUNT=$(echo "$COMMITS" | grep -ciE "(fix|bug)" || echo 0)
+          UPDATE_COUNT=$(echo "$COMMITS" | grep -ciE "(update|change|refactor)" || echo 0)
+
+          echo "feature_count=$FEATURE_COUNT" >> $GITHUB_OUTPUT
+          echo "fix_count=$FIX_COUNT" >> $GITHUB_OUTPUT
+          echo "update_count=$UPDATE_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Update CHANGELOG.md
+        run: |
+          NEW_VERSION="${{ steps.new-version.outputs.new }}"
+          CURRENT_DATE=$(date +%Y-%m-%d)
+
+          # Create Python script to update changelog
+          cat > update_changelog.py << 'PYTHON_SCRIPT'
+          import re
+          import sys
+          from datetime import datetime
+
+          new_version = sys.argv[1]
+          current_date = sys.argv[2]
+
+          # Read recent commits
+          with open('recent_commits.txt', 'r') as f:
+              commits = [line.strip() for line in f.readlines() if line.strip()]
+
+          # Categorize commits
+          added = []
+          changed = []
+          fixed = []
+          security = []
+
+          for commit in commits:
+              commit_lower = commit.lower()
+              # Clean up commit message - remove conventional commit prefixes
+              clean_commit = re.sub(r'^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\([\w\-]+\))?:\s*', '', commit, flags=re.IGNORECASE)
+              clean_commit = clean_commit[0].upper() + clean_commit[1:] if clean_commit else commit
+
+              if any(word in commit_lower for word in ['add', 'feat', 'feature', 'implement', 'create']):
+                  added.append(f"- {clean_commit}")
+              elif any(word in commit_lower for word in ['fix', 'bug', 'resolve', 'correct']):
+                  fixed.append(f"- {clean_commit}")
+              elif any(word in commit_lower for word in ['security', 'cve', 'vulnerability']):
+                  security.append(f"- {clean_commit}")
+              elif any(word in commit_lower for word in ['update', 'change', 'refactor', 'improve', 'enhance']):
+                  changed.append(f"- {clean_commit}")
+              else:
+                  changed.append(f"- {clean_commit}")
+
+          # Read current changelog
+          try:
+              with open('CHANGELOG.md', 'r') as f:
+                  content = f.read()
+          except FileNotFoundError:
+              # Create new changelog if it doesn't exist
+              content = """# Changelog
+
+          All notable changes to Harbor Container Updater will be documented in this file.
+
+          The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+          and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+          ## [Unreleased]
+
+          ### Added
+          -
+
+          ### Changed
+          -
+
+          ### Fixed
+          -
+
+          ### Security
+          -
+
+          """
+
+          # Check if version already exists
+          if f"## [{new_version}]" in content:
+              print(f"Version {new_version} already exists in CHANGELOG")
+              sys.exit(0)
+
+          # Create new version section
+          new_section = f"\n## [{new_version}] - {current_date}\n"
+
+          if added:
+              new_section += "\n### Added\n"
+              new_section += "\n".join(added) + "\n"
+
+          if changed:
+              new_section += "\n### Changed\n"
+              new_section += "\n".join(changed) + "\n"
+
+          if fixed:
+              new_section += "\n### Fixed\n"
+              new_section += "\n".join(fixed) + "\n"
+
+          if security:
+              new_section += "\n### Security\n"
+              new_section += "\n".join(security) + "\n"
+
+          # If no commits categorized, add a generic entry
+          if not (added or changed or fixed or security):
+              new_section += "\n### Changed\n"
+              new_section += "- Version bump and minor improvements\n"
+
+          # Find where to insert the new section
+          if "## [Unreleased]" in content:
+              # Find the end of the Unreleased section
+              unreleased_match = re.search(r'## \[Unreleased\].*?(?=\n## \[|\n\[Unreleased\]:|$)', content, re.DOTALL)
+              if unreleased_match:
+                  insert_pos = unreleased_match.end()
+                  content = content[:insert_pos] + new_section + content[insert_pos:]
+          else:
+              # Insert after the header
+              lines = content.split('\n')
+              for i, line in enumerate(lines):
+                  if line.startswith('## ['):
+                      lines.insert(i, new_section.strip())
+                      break
+              else:
+                  # No version sections found, append at end
+                  lines.append(new_section.strip())
+              content = '\n'.join(lines)
+
+          # Update the version links at the bottom
+          if '[Unreleased]:' in content:
+              content = re.sub(
+                  r'\[Unreleased\]: https://github\.com/[^/]+/[^/]+/compare/[^.]+\.\.\.HEAD',
+                  f'[Unreleased]: https://github.com/DeusExTaco/harbor/compare/v{new_version}...HEAD',
+                  content
+              )
+
+          # Add version comparison link
+          if f'[{new_version}]:' not in content:
+              # Find where to add the link
+              lines = content.split('\n')
+              for i, line in enumerate(lines):
+                  if '[Unreleased]:' in line:
+                      # Get previous version from the next link
+                      prev_version = None
+                      if i + 1 < len(lines):
+                          match = re.match(r'\[([^\]]+)\]:', lines[i + 1])
+                          if match:
+                              prev_version = match.group(1)
+
+                      if prev_version:
+                          new_link = f'[{new_version}]: https://github.com/DeusExTaco/harbor/compare/v{prev_version}...v{new_version}'
+                      else:
+                          new_link = f'[{new_version}]: https://github.com/DeusExTaco/harbor/releases/tag/v{new_version}'
+
+                      lines.insert(i + 1, new_link)
+                      break
+              else:
+                  # No links section found, add at end
+                  lines.append(f'\n[{new_version}]: https://github.com/DeusExTaco/harbor/releases/tag/v{new_version}')
+
+              content = '\n'.join(lines)
+
+          # Write updated changelog
+          with open('CHANGELOG.md', 'w') as f:
+              f.write(content)
+
+          print(f"✅ Updated CHANGELOG.md with version {new_version}")
+          PYTHON_SCRIPT
+
+          python update_changelog.py "$NEW_VERSION" "$CURRENT_DATE"
+
+      - name: Verify all files are updated
+        run: |
+          NEW_VERSION="${{ steps.new-version.outputs.new }}"
+
+          # Verify both files have the same version
+          python -c "
+          import re
+          import sys
+
+          # Check app/__init__.py
+          with open('app/__init__.py', 'r') as f:
+              content = f.read()
+              match = re.search(r'__version__ = [\"']([^\"']+)[\"']', content)
+              app_version = match.group(1) if match else None
+
+          # Check pyproject.toml
+          with open('pyproject.toml', 'r') as f:
+              content = f.read()
+              match = re.search(r'^version = \"([^\"]+)\"', content, re.MULTILINE)
+              proj_version = match.group(1) if match else None
+
+          # Check CHANGELOG.md
+          with open('CHANGELOG.md', 'r') as f:
+              content = f.read()
+              changelog_has_version = f'## [{NEW_VERSION}]' in content
+
+          print(f'app/__init__.py version: {app_version}')
+          print(f'pyproject.toml version: {proj_version}')
+          print(f'CHANGELOG.md has version {NEW_VERSION}: {changelog_has_version}')
+
+          if app_version != proj_version:
+              print('❌ Version mismatch between app/__init__.py and pyproject.toml!')
+              sys.exit(1)
+
+          if app_version != '${NEW_VERSION}':
+              print(f'❌ Version not updated correctly. Expected: ${NEW_VERSION}, Got: {app_version}')
+              sys.exit(1)
+
+          if not changelog_has_version:
+              print(f'❌ CHANGELOG.md was not updated with version ${NEW_VERSION}')
+              sys.exit(1)
+
+          print('✅ All files are consistently updated')
+          "
+
+      - name: Commit version bump and changelog
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          # Add all changed files
+          git add app/__init__.py pyproject.toml CHANGELOG.md
+
+          # Create detailed commit message
+          FEATURE_COUNT="${{ steps.get-commits.outputs.feature_count }}"
+          FIX_COUNT="${{ steps.get-commits.outputs.fix_count }}"
+          UPDATE_COUNT="${{ steps.get-commits.outputs.update_count }}"
+
+          # Commit with skip-ci to avoid triggering another workflow run
+          git commit -m "[skip ci] Bump version to ${{ steps.new-version.outputs.new }}
+
+          Automated version bump from ${{ steps.current-version.outputs.current }} to ${{ steps.new-version.outputs.new }}
+
+          Summary of changes:
+          - Features/Additions: ${FEATURE_COUNT}
+          - Bug Fixes: ${FIX_COUNT}
+          - Updates/Changes: ${UPDATE_COUNT}
+
+          Files updated:
+          - app/__init__.py
+          - pyproject.toml
+          - CHANGELOG.md
+
+          Triggered by: ${{ github.event.head_commit.message }}"
+
+          # Push the changes
+          git push
+
+      - name: Create version bump summary
+        run: |
+          echo "# 🔄 Version Bump & Changelog Update" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📊 Version Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Previous Version**: ${{ steps.current-version.outputs.current }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **New Version**: ${{ steps.new-version.outputs.new }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Base Version**: ${{ steps.new-version.outputs.base }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Alpha Number**: ${{ steps.new-version.outputs.alpha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📈 Change Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Features/Additions**: ${{ steps.get-commits.outputs.feature_count }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Bug Fixes**: ${{ steps.get-commits.outputs.fix_count }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Updates/Changes**: ${{ steps.get-commits.outputs.update_count }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📝 Files Updated" >> $GITHUB_STEP_SUMMARY
+          echo "- \`app/__init__.py\` ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- \`pyproject.toml\` ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- \`CHANGELOG.md\` ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎯 Milestone" >> $GITHUB_STEP_SUMMARY
+          echo "- **Current**: M0 (Foundation)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔗 Triggered By" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Message**: ${{ github.event.head_commit.message }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Author**: ${{ github.event.head_commit.author.name }}" >> $GITHUB_STEP_SUMMARY

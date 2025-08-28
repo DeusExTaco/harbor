@@ -15,9 +15,7 @@ on:
       build-successful:
         description: "Whether build was successful"
         value: ${{ jobs.summary.outputs.build-successful }}
-  push:
-    branches: [main, develop]
-    tags: ['v*']
+  # REMOVED independent push triggers - now only callable from main pipeline
 
 permissions:
   contents: read
@@ -59,8 +57,21 @@ jobs:
             echo "should-build=true" >> $GITHUB_OUTPUT
           fi
 
-          # Extract version from pyproject.toml for proper tagging
-          VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          # Extract version from app/__init__.py (source of truth)
+          if [ -f "app/__init__.py" ]; then
+            VERSION=$(python -c "
+          import re
+          with open('app/__init__.py', 'r') as f:
+              content = f.read()
+              match = re.search(r'__version__ = [\"']([^\"']+)[\"']', content)
+              if match:
+                  print(match.group(1))
+          " || echo "0.1.0-alpha.3")
+          else
+            # Fallback to pyproject.toml
+            VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          fi
+
           echo "harbor-version=$VERSION" >> $GITHUB_OUTPUT
           echo "📦 Detected version: $VERSION"
 
@@ -80,15 +91,15 @@ jobs:
             echo "📦 Main branch - using production Dockerfile with 'latest' and version tags"
           elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
             # Develop branch - development build
-            echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:develop,${{ env.REGISTRY_IMAGE_DOCKERHUB }}:$VERSION-dev" >> $GITHUB_OUTPUT
-            echo "ghcr-tags=${{ env.REGISTRY_IMAGE_GHCR }}:develop,${{ env.REGISTRY_IMAGE_GHCR }}:$VERSION-dev" >> $GITHUB_OUTPUT
+            echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:develop,${{ env.REGISTRY_IMAGE_DOCKERHUB }}:$VERSION" >> $GITHUB_OUTPUT
+            echo "ghcr-tags=${{ env.REGISTRY_IMAGE_GHCR }}:develop,${{ env.REGISTRY_IMAGE_GHCR }}:$VERSION" >> $GITHUB_OUTPUT
             echo "dockerfile=deploy/docker/Dockerfile.dev" >> $GITHUB_OUTPUT
-            echo "📦 Develop branch - using dev Dockerfile with 'develop' and dev version tags"
+            echo "📦 Develop branch - using dev Dockerfile with 'develop' and version tags"
           else
             # Feature branches - development build with branch name
             BRANCH_NAME=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
-            echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:$BRANCH_NAME,${{ env.REGISTRY_IMAGE_DOCKERHUB }}:$VERSION-$BRANCH_NAME" >> $GITHUB_OUTPUT
-            echo "ghcr-tags=${{ env.REGISTRY_IMAGE_GHCR }}:$BRANCH_NAME,${{ env.REGISTRY_IMAGE_GHCR }}:$VERSION-$BRANCH_NAME" >> $GITHUB_OUTPUT
+            echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:$BRANCH_NAME,${{ env.REGISTRY_IMAGE_DOCKERHUB }}:$VERSION" >> $GITHUB_OUTPUT
+            echo "ghcr-tags=${{ env.REGISTRY_IMAGE_GHCR }}:$BRANCH_NAME,${{ env.REGISTRY_IMAGE_GHCR }}:$VERSION" >> $GITHUB_OUTPUT
             echo "dockerfile=deploy/docker/Dockerfile.dev" >> $GITHUB_OUTPUT
             echo "📦 Feature branch ($BRANCH_NAME) - using dev Dockerfile with branch tags"
           fi
@@ -135,7 +146,7 @@ jobs:
           fi
           echo "✅ Using Dockerfile: $DOCKERFILE"
 
-      # Extract metadata using docker/metadata-action (no here-docs)
+      # Extract metadata using docker/metadata-action
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -184,7 +195,7 @@ jobs:
       # Output build information for debugging
       - name: Build information
         run: |
-          echo "🏗️ Build completed successfully!"
+          echo "🗿 Build completed successfully!"
           echo "📦 Docker Hub tags: ${{ needs.build-config.outputs.docker-tags }}"
           echo "📦 GHCR tags: ${{ needs.build-config.outputs.ghcr-tags }}"
           echo "🐳 Dockerfile: ${{ needs.build-config.outputs.dockerfile }}"
@@ -257,7 +268,7 @@ jobs:
           # Wait for startup with timeout
           echo "⏳ Waiting for application startup..."
           for i in {1..30}; do
-            if docker exec $CONTAINER_NAME python scripts/health_check.py; then
+            if docker exec $CONTAINER_NAME python scripts/health_check.py 2>/dev/null; then
               echo "✅ Container started successfully"
               break
             fi
@@ -325,7 +336,7 @@ jobs:
           echo "📋 Build Status: ${BUILD_STATUS}"
           echo "🔧 Branch: ${{ github.ref_name }}"
           echo "📦 Dockerfile: ${{ needs.build-config.outputs.dockerfile }}"
-          echo "🗏️ Platform: linux/amd64"
+          echo "🗿 Platform: linux/amd64"
           echo "📝 Commit: ${{ github.sha }}"
           echo "🏷️ Version: ${{ needs.build-config.outputs.harbor-version }}"
           echo ""
