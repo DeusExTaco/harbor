@@ -335,6 +335,9 @@ jobs:
         run: |
           echo "📋 Applying license overrides for packages with UNKNOWN licenses..."
 
+          # Install pip-licenses if not already installed
+          pip install pip-licenses
+
           # Create Python script to fix licenses
           cat > fix_licenses.py << 'EOF'
           import subprocess
