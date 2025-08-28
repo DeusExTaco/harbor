@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.api_keys import get_api_key_manager
+from app.auth.api_keys import APIKeyManager, get_api_key_manager
 from app.auth.csrf import get_csrf_protection
 from app.auth.password import verify_password
 from app.auth.sessions import SessionData, get_session_manager
@@ -67,13 +67,33 @@ class AuthenticationResult:
         account_locked: bool = False,
     ):
         """Initialize authentication result."""
-        self.success = success
+        self.is_success = success  # Renamed from 'success' to avoid conflict
         self.user = user
         self.session = session
         self.api_key = api_key
         self.error_message = error_message
         self.requires_mfa = requires_mfa
         self.account_locked = account_locked
+
+    @property
+    def success(self) -> bool:
+        """Backward compatibility property for success attribute."""
+        return self.is_success
+
+    @classmethod
+    def create_success(  # Renamed from 'success' to avoid conflict
+        cls,
+        user: User,
+        session: SessionData | None = None,
+        api_key: APIKey | None = None,
+    ) -> "AuthenticationResult":
+        """Create a successful authentication result."""
+        return cls(success=True, user=user, session=session, api_key=api_key)
+
+    @classmethod
+    def failed(cls, error_message: str) -> "AuthenticationResult":
+        """Create a failed authentication result."""
+        return cls(success=False, error_message=error_message)
 
 
 class AuthenticationManager:
@@ -83,11 +103,11 @@ class AuthenticationManager:
     Handles both session-based (web UI) and API key authentication.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize authentication manager."""
         self.settings = get_settings()
         self.session_manager = get_session_manager()
-        self.api_key_manager = get_api_key_manager()
+        self.api_key_manager = APIKeyManager()  # Create directly
         self.csrf_protection = get_csrf_protection()
 
         # Account lockout configuration
@@ -207,7 +227,7 @@ class AuthenticationManager:
 
     async def authenticate_api_key(
         self,
-        db: AsyncSession,
+        session: AsyncSession,
         api_key: str,
         ip_address: str | None = None,
     ) -> AuthenticationResult:
@@ -215,75 +235,84 @@ class AuthenticationManager:
         Authenticate with API key.
 
         Args:
-            db: Database session
+            session: Database session
             api_key: API key to authenticate
             ip_address: Client IP address
 
         Returns:
             Authentication result
         """
-        # Validate API key format
-        if not self.api_key_manager.validate_api_key_format(api_key):
-            logger.warning("Invalid API key format")
-            return AuthenticationResult(
-                success=False,
-                error_message="Invalid API key",
+        try:
+            # Validate API key format
+            if not self.api_key_manager.validate_api_key_format(api_key):
+                logger.warning(f"Invalid API key format from {ip_address}")
+                return AuthenticationResult.failed("Invalid API key")
+
+            # Extract hash for lookup
+            key_hash = self.api_key_manager.extract_key_hash(api_key)
+            if not key_hash:
+                logger.warning(f"Failed to extract key hash from {ip_address}")
+                return AuthenticationResult.failed("Invalid API key")
+
+            # Look up API key in database (including inactive/expired)
+            from app.db.repositories.api_key import APIKeyRepository
+
+            api_key_repo = APIKeyRepository(session)
+            api_key_record = await api_key_repo.get_by_key_hash(key_hash)
+
+            if not api_key_record:
+                logger.warning(f"API key not found from {ip_address}")
+                return AuthenticationResult.failed("Invalid API key")
+
+            # Check if revoked
+            if not api_key_record.is_active:
+                logger.warning(f"Revoked API key used from {ip_address}")
+                return AuthenticationResult.failed("Invalid API key")
+
+            # Check expiration
+            if api_key_record.is_expired():
+                logger.warning(f"Expired API key used from {ip_address}")
+                return AuthenticationResult.failed("API key has expired")
+
+            # Verify the actual key matches (additional security check)
+            if not self.api_key_manager.verify_api_key(
+                api_key, api_key_record.key_hash
+            ):
+                logger.warning(f"API key verification failed from {ip_address}")
+                return AuthenticationResult.failed("Invalid API key")
+
+            # Get associated user
+            from app.db.repositories.user import UserRepository
+
+            user_repo = UserRepository(session)
+            user = await user_repo.get_by_id(
+                api_key_record.created_by_user_id
+            )  # FIXED: Changed from get to get_by_id
+
+            if not user:
+                logger.error(f"User not found for API key {api_key_record.id}")
+                return AuthenticationResult.failed("Invalid API key")
+
+            if not user.is_active:
+                logger.warning(f"Inactive user attempted API key auth: {user.username}")
+                return AuthenticationResult.failed("Account is inactive")
+
+            # Track usage
+            await api_key_repo.track_usage(
+                api_key_id=api_key_record.id, ip_address=ip_address
             )
 
-        # Hash the API key for lookup
-        key_hash = self.api_key_manager.hash_api_key(api_key)
-
-        # Find API key in database
-        stmt = select(APIKey).where(
-            APIKey.key_hash == key_hash,
-            APIKey.is_active == True,
-        )
-        result = await db.execute(stmt)
-        api_key_record = result.scalar_one_or_none()
-
-        if not api_key_record:
-            logger.warning(f"API key authentication failed from {ip_address}")
-            return AuthenticationResult(
-                success=False,
-                error_message="Invalid API key",
+            logger.info(
+                f"API key authentication successful for user {user.username} from {ip_address}"
             )
 
-        # Check expiration
-        if api_key_record.expires_at and datetime.now(UTC) > api_key_record.expires_at:
-            safe_key_name = sanitize_for_logging(api_key_record.name)
-            logger.warning(f"Expired API key used: {safe_key_name}")
-            return AuthenticationResult(
-                success=False,
-                error_message="API key has expired",
+            return AuthenticationResult.create_success(
+                user=user, api_key=api_key_record
             )
 
-        # Get associated user
-        user_stmt = select(User).where(User.id == api_key_record.created_by_user_id)
-        user_result = await db.execute(user_stmt)
-        user = user_result.scalar_one_or_none()
-
-        if not user or not user.is_active:
-            safe_key_name = sanitize_for_logging(api_key_record.name)
-            logger.warning(f"API key associated with invalid user: {safe_key_name}")
-            return AuthenticationResult(
-                success=False,
-                error_message="API key is invalid",
-            )
-
-        # Update API key usage
-        api_key_record.last_used_at = datetime.now(UTC)
-        api_key_record.last_used_ip = ip_address
-        api_key_record.usage_count = (api_key_record.usage_count or 0) + 1
-        await db.commit()
-
-        safe_key_name = sanitize_for_logging(api_key_record.name)
-        logger.info(f"API key {safe_key_name} authenticated successfully")
-
-        return AuthenticationResult(
-            success=True,
-            user=user,
-            api_key=api_key_record,
-        )
+        except Exception as e:
+            logger.error(f"API key authentication error: {e}")
+            return AuthenticationResult.failed("Authentication failed")
 
     def validate_session(self, session_id: str) -> SessionData | None:
         """

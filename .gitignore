@@ -66,6 +66,7 @@ htmlcov/
 coverage.xml
 *.cover
 .hypothesis/
+*.pyc
 
 # =============================================================================
 # Development Files
@@ -79,6 +80,7 @@ coverage.xml
 # Development scripts (keep shell scripts)
 scripts/dev/*.py
 !scripts/dev/*.sh
+scripts/*.sh
 
 # =============================================================================
 # Harbor Application Data

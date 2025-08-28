@@ -108,37 +108,55 @@ class APIKeyManager:
         Raises:
             ValueError: If no secret key is configured in production mode
         """
-        # Get the main application secret - check different possible locations
-        settings = self.settings
-
-        # Try different possible attribute names for the secret key
+        # Check for secret key in multiple locations
         app_secret = None
 
-        # Check if secret_key exists at root level
-        if hasattr(settings, "secret_key"):
-            app_secret = settings.secret_key
-        # Check if it's under security settings with different name
-        elif hasattr(settings, "security"):
-            if hasattr(settings.security, "secret_key"):
-                app_secret = settings.security.secret_key
-            elif hasattr(settings.security, "app_secret_key"):
-                app_secret = settings.security.app_secret_key
-            elif hasattr(settings.security, "harbor_secret_key"):
-                app_secret = settings.security.harbor_secret_key
+        # First, try environment variable directly
+        app_secret = os.getenv("HARBOR_SECRET_KEY")
 
-        # If still not found, check environment variable directly
+        # If not found, check settings object
         if not app_secret:
-            app_secret = os.getenv("HARBOR_SECRET_KEY")
+            settings = self.settings
+
+            # Try different possible attribute names for the secret key
+            if hasattr(settings, "harbor_secret_key"):
+                app_secret = settings.harbor_secret_key
+            elif hasattr(settings, "secret_key"):
+                app_secret = settings.secret_key
+            # Check if it's under security settings
+            elif hasattr(settings, "security"):
+                if hasattr(settings.security, "secret_key"):
+                    app_secret = settings.security.secret_key
+                elif hasattr(settings.security, "app_secret_key"):
+                    app_secret = settings.security.app_secret_key
+                elif hasattr(settings.security, "harbor_secret_key"):
+                    app_secret = settings.security.harbor_secret_key
 
         # Handle missing secret based on environment
         if not app_secret:
-            harbor_mode = os.getenv("HARBOR_MODE", "production")
-            is_testing = os.getenv("TESTING") == "true"
+            # Check deployment mode
+            harbor_mode = os.getenv("HARBOR_MODE", "production").lower()
+            is_testing = os.getenv("TESTING", "false").lower() == "true"
 
-            if is_testing or harbor_mode == "development":
-                # For development/testing, use a generated secret
+            # Also check if we can determine mode from settings
+            is_development = False
+            if hasattr(self.settings, "is_development"):
+                is_development = self.settings.is_development()
+            elif hasattr(self.settings, "deployment_profile"):
+                is_development = self.settings.deployment_profile in [
+                    "development",
+                    "homelab",
+                ]
+
+            # In development/testing/homelab modes, use a generated secret
+            if (
+                is_testing
+                or harbor_mode in ["development", "homelab"]
+                or is_development
+            ):
                 logger.warning(
-                    "No HARBOR_SECRET_KEY found, using generated development secret"
+                    "No HARBOR_SECRET_KEY found, using generated development secret. "
+                    "THIS IS NOT SECURE FOR PRODUCTION USE!"
                 )
                 app_secret = self._get_or_create_development_secret()
             else:

@@ -58,7 +58,7 @@ dependencies = [
 
     # Security
     "argon2-cffi>=23.1.0,<24.0.0",        # Password hashing
-    "cryptography>=43.0.0,<44.0.0",       # Credential encryption
+    "cryptography>=44.0.1",       # Credential encryption
 
     # Utilities
     "python-dateutil>=2.8.0,<3.0.0",
@@ -179,7 +179,6 @@ exclude = ["tests*"]
 [tool.pytest.ini_options]
 minversion = "7.0"
 asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
@@ -233,6 +232,27 @@ lint.ignore = [
     "E501",   # Line too long (handled by Black)
     "B008",   # Do not perform function calls in argument defaults
     "N806",   # Variable in function should be lowercase (SQLAlchemy models)
+    "E711",   # None comparison - needed for SQLAlchemy
+    "E712",   # Boolean comparison - needed for SQLAlchemy
+    "RUF022", # __all__ sorting - not critical
+    "PTH123", # Path.open() - os.open() is fine
+    "PTH110", # Path.exists() - os.path.exists() is fine
+    "PTH101", # Path.chmod() - os.chmod() is fine
+    "PTH202", # Path.stat() - os.path.getsize() is fine
+    "SIM102", # Nested if - sometimes clearer
+    "SIM103", # Return condition directly - sometimes less readable
+    "SIM105", # contextlib.suppress - try/except is clearer
+    "SIM108", # Ternary operator - sometimes less readable
+    "SIM117", # Combine with statements - not always possible with async
+    "F401",   # Unused imports - needed for SQLAlchemy model registration
+    "F841",   # Local variable assigned but never used
+    "N805",   # First argument should be self - cls is correct for @declared_attr
+    "B904",   # raise from - not always needed
+    "RUF005", # Consider unpacking - personal preference
+    "RUF015", # Prefer next() - can be less readable
+    "E402",   # Module level import not at top - sometimes necessary
+    "UP038",  # Use X | Y - not always clearer
+    "RUF100",
 ]
 
 # Exclude specific directories

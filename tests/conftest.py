@@ -22,6 +22,11 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import StaticPool
 
+# Import auth components for testing
+from app.auth.api_keys import APIKeyManager
+from app.auth.manager import AuthenticationManager
+from app.auth.sessions import SessionManager
+
 # Import all models to ensure they're registered
 from app.db.base import Base
 from app.db.models.api_key import APIKey
@@ -163,6 +168,122 @@ async def test_user(committed_session: AsyncSession) -> User:
 
 
 # ============================================================================
+# API Key Testing Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def api_key_manager():
+    """Create APIKeyManager instance for testing"""
+    manager = APIKeyManager()
+    # Use a test HMAC key for consistent testing
+    manager._hmac_key = b"test_hmac_key_for_testing_only"
+    return manager
+
+
+@pytest.fixture
+def auth_manager():
+    """Create AuthenticationManager instance for testing"""
+    return AuthenticationManager()
+
+
+@pytest.fixture
+def session_manager():
+    """Create SessionManager instance for testing"""
+    return SessionManager()
+
+
+@pytest.fixture
+def test_api_key_pair(api_key_manager):
+    """Generate a test API key pair"""
+    plain_key, hashed_key = api_key_manager.generate_api_key()
+    return plain_key, hashed_key
+
+
+@pytest.fixture
+async def authenticated_api_key(
+    committed_session: AsyncSession, sample_user: User, test_api_key_pair
+) -> tuple[str, APIKey]:
+    """Create a valid API key for testing authenticated requests"""
+    plain_key, hashed_key = test_api_key_pair
+
+    api_key = APIKey(
+        name="test-auth-key",
+        key_hash=hashed_key,
+        created_by_user_id=sample_user.id,
+        description="Test API key for authenticated requests",
+    )
+
+    committed_session.add(api_key)
+    await committed_session.commit()
+    await committed_session.refresh(api_key)
+
+    return plain_key, api_key
+
+
+@pytest.fixture
+async def expired_api_key(
+    committed_session: AsyncSession, sample_user: User, test_api_key_pair
+) -> tuple[str, APIKey]:
+    """Create an expired API key for testing"""
+    from datetime import UTC, datetime, timedelta
+
+    plain_key, hashed_key = test_api_key_pair
+
+    api_key = APIKey(
+        name="test-expired-key",
+        key_hash=hashed_key,
+        created_by_user_id=sample_user.id,
+        expires_at=datetime.now(UTC) - timedelta(days=1),  # Expired yesterday
+        description="Test expired API key",
+    )
+
+    committed_session.add(api_key)
+    await committed_session.commit()
+    await committed_session.refresh(api_key)
+
+    return plain_key, api_key
+
+
+@pytest.fixture
+async def revoked_api_key(
+    committed_session: AsyncSession, sample_user: User, test_api_key_pair
+) -> tuple[str, APIKey]:
+    """Create a revoked API key for testing"""
+    plain_key, hashed_key = test_api_key_pair
+
+    api_key = APIKey(
+        name="test-revoked-key",
+        key_hash=hashed_key,
+        created_by_user_id=sample_user.id,
+        description="Test revoked API key",
+    )
+    api_key.revoke()  # Revoke it immediately
+
+    committed_session.add(api_key)
+    await committed_session.commit()
+    await committed_session.refresh(api_key)
+
+    return plain_key, api_key
+
+
+@pytest.fixture
+def authenticated_session(
+    sample_user: User, session_manager: SessionManager
+) -> tuple[str, str]:
+    """Create an authenticated session for testing web UI requests"""
+    session = session_manager.create_session(
+        user_id=sample_user.id,
+        username=sample_user.username,
+        is_admin=sample_user.is_admin,
+        ip_address="127.0.0.1",
+        user_agent="pytest",
+    )
+
+    return session.session_id, session.csrf_token
+
+
+# ============================================================================
 # Model Fixtures
 # ============================================================================
 
@@ -226,11 +347,15 @@ async def sample_system_settings(async_session: AsyncSession) -> SystemSettings:
 
 
 @pytest.fixture
-async def sample_api_key(async_session: AsyncSession, sample_user: User) -> APIKey:
-    """Create a sample API key for testing"""
+async def sample_api_key(
+    async_session: AsyncSession, sample_user: User, api_key_manager: APIKeyManager
+) -> APIKey:
+    """Create a sample API key for testing with proper hashing"""
+    plain_key, hashed_key = api_key_manager.generate_api_key()
+
     api_key = APIKey(
         name="test-key",
-        key_hash="hashed_api_key_123",
+        key_hash=hashed_key,
         created_by_user_id=sample_user.id,
         description="Test API key for testing",
     )
@@ -349,6 +474,100 @@ def mock_registry_client():
     )
 
     return mock_client
+
+
+# ============================================================================
+# HTTP Client Fixtures with Authentication
+# ============================================================================
+
+
+@pytest.fixture
+async def authenticated_client(async_test_client, authenticated_api_key):
+    """Create an authenticated HTTP client using API key"""
+    plain_key, api_key = authenticated_api_key
+
+    # Add API key to default headers
+    async_test_client.headers["X-API-Key"] = plain_key
+
+    yield async_test_client
+
+    # Clean up headers
+    del async_test_client.headers["X-API-Key"]
+
+
+@pytest.fixture
+async def session_authenticated_client(async_test_client, authenticated_session):
+    """Create an authenticated HTTP client using session"""
+    session_id, csrf_token = authenticated_session
+
+    # Set session cookie
+    async_test_client.cookies.set("harbor_session", session_id)
+    # Add CSRF token to headers
+    async_test_client.headers["X-CSRF-Token"] = csrf_token
+
+    yield async_test_client
+
+    # Clean up
+    async_test_client.cookies.clear()
+    del async_test_client.headers["X-CSRF-Token"]
+
+
+# ============================================================================
+# Repository Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+async def user_repository(async_session: AsyncSession):
+    """Create UserRepository instance for testing"""
+    from app.db.repositories.user import UserRepository
+
+    return UserRepository(async_session)
+
+
+@pytest.fixture
+async def container_repository(async_session: AsyncSession):
+    """Create ContainerRepository instance for testing"""
+    from app.db.repositories.container import ContainerRepository
+
+    return ContainerRepository(async_session)
+
+
+@pytest.fixture
+async def api_key_repository(async_session: AsyncSession):
+    """Create APIKeyRepository instance for testing"""
+    from app.db.repositories.api_key import APIKeyRepository
+
+    return APIKeyRepository(async_session)
+
+
+# ============================================================================
+# FastAPI Test Client Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def test_client():
+    """Create FastAPI test client"""
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    app = create_app()
+    return TestClient(app)
+
+
+@pytest.fixture
+async def async_test_client():
+    """Create async FastAPI test client"""
+    from httpx import AsyncClient
+
+    from app.main import create_app
+
+    app = create_app()
+
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        yield client
 
 
 # ============================================================================
@@ -523,56 +742,6 @@ async def create_test_data(
     await session.commit()
 
     return {"users": users, "containers": containers, "settings": settings}
-
-
-# ============================================================================
-# Repository Fixtures
-# ============================================================================
-
-
-@pytest.fixture
-async def user_repository(async_session: AsyncSession):
-    """Create UserRepository instance for testing"""
-    from app.db.repositories.user import UserRepository
-
-    return UserRepository(async_session)
-
-
-@pytest.fixture
-async def container_repository(async_session: AsyncSession):
-    """Create ContainerRepository instance for testing"""
-    from app.db.repositories.container import ContainerRepository
-
-    return ContainerRepository(async_session)
-
-
-# ============================================================================
-# FastAPI Test Client Fixtures
-# ============================================================================
-
-
-@pytest.fixture
-def test_client():
-    """Create FastAPI test client"""
-    from fastapi.testclient import TestClient
-
-    from app.main import create_app
-
-    app = create_app()
-    return TestClient(app)
-
-
-@pytest.fixture
-async def async_test_client():
-    """Create async FastAPI test client"""
-    from httpx import AsyncClient
-
-    from app.main import create_app
-
-    app = create_app()
-
-    async with AsyncClient(app=app, base_url="http://test") as client:
-        yield client
 
 
 # ============================================================================

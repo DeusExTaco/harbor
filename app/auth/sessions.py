@@ -106,7 +106,7 @@ class SessionManager:
     Current implementation is suitable for single-instance home lab deployment.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize session manager."""
         self.settings = get_settings()
         self._sessions: dict[str, SessionData] = {}
@@ -301,7 +301,7 @@ class SessionManager:
             return
 
         # Get all user's sessions with timestamps
-        sessions_with_time = []
+        sessions_with_time: list[tuple[str, datetime]] = []
         for sid in user_session_ids:
             if sid in self._sessions:
                 session = self._sessions[sid]
@@ -345,6 +345,36 @@ class SessionManager:
     def get_user_session_count(self, user_id: int) -> int:
         """Get number of active sessions for a user."""
         return len(self._user_sessions.get(user_id, set()))
+
+    async def initialize(self) -> None:
+        """
+        Initialize the session manager.
+
+        This is called during application startup to ensure the session
+        manager is ready for use.
+        """
+        # Clean up any expired sessions on startup
+        expired_count = self.cleanup_expired_sessions()
+        if expired_count > 0:
+            logger.info(f"Cleaned up {expired_count} expired sessions on startup")
+
+        logger.debug("Session manager initialized")
+
+    async def close(self) -> None:
+        """
+        Clean up session manager resources.
+
+        This is called during application shutdown.
+        """
+        # Clear all sessions on shutdown
+        session_count = len(self._sessions)
+        self._sessions.clear()
+        self._user_sessions.clear()
+
+        if session_count > 0:
+            logger.info(f"Cleared {session_count} sessions on shutdown")
+
+        logger.debug("Session manager closed")
 
 
 # Global session manager instance
