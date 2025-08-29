@@ -38,14 +38,7 @@ jobs:
         run: |
           # Extract current version from app/__init__.py
           if [ -f "app/__init__.py" ]; then
-            CURRENT_VERSION=$(python -c "
-          import re
-          with open('app/__init__.py', 'r') as f:
-              content = f.read()
-              match = re.search(r'__version__ = [\"']([^\"']+)[\"']', content)
-              if match:
-                  print(match.group(1))
-          ")
+            CURRENT_VERSION=$(grep "__version__" app/__init__.py | cut -d'"' -f2)
             echo "Current version: $CURRENT_VERSION"
             echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
           else
