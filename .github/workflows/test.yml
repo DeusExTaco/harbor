@@ -325,6 +325,38 @@ jobs:
           retention-days: 30
 
   # =============================================================================
+  # PR Test Summary Updating
+  # =============================================================================    # Add this job to test.yml after test-summary job
+
+  pr-comment:
+    name: Update PR Test Summary
+    needs: [test-summary]
+    if: github.event_name == 'pull_request' && always()
+    uses: ./.github/workflows/pr-comment.yml
+    with:
+      comment-id: 'test-summary'
+      title: '🧪 Harbor Test Results'
+      body: |
+        ### Test Suite Status
+
+        | Component | Status |
+        |-----------|--------|
+        | 🔍 Code Quality | ${{ needs.quality.result }} |
+        | 🧪 Unit Tests | ${{ needs.test.result }} |
+        | 🐳 Docker Build | ${{ needs.docker.result }} |
+        | 📚 Documentation | ${{ needs.docs.result }} |
+
+        **Overall Result**: ${{ needs.test-summary.outputs.tests-passed == 'true' && '✅ PASSED' || '❌ FAILED' }}
+
+        ### Details
+        - Python versions tested: 3.11, 3.12, 3.13
+        - Test coverage: View in artifacts
+        - Duration: ~${{ github.run_duration }} minutes
+
+        [View Full Test Report](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+
+  # =============================================================================
   # Deployment Readiness Check (Only on main branch)
   # =============================================================================
   deploy-check:

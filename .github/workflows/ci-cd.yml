@@ -593,3 +593,75 @@ jobs:
             echo "❌ Harbor CI/CD Pipeline failed!"
             exit 1
           fi
+  # =============================================================================
+  # Stage 8: PR Comment Update (ADD THIS NEW SECTION)
+  # =============================================================================
+
+  pr-pipeline-comment:
+    name: Update PR Pipeline Summary
+    needs: [ code-quality, static-security, dependency-security, test-suite, build-config, docker-build, container-security, create-github-release, pipeline-summary ]
+    if: github.event_name == 'pull_request' && always()
+    runs-on: ubuntu-latest
+
+    permissions:
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Generate PR summary
+        run: |
+          cat > pr-summary.md << 'EOF'
+          <!-- harbor-pr-comment:pipeline-summary -->
+          ## 🚀 Harbor CI/CD Pipeline Results
+
+          ### Pipeline Status
+
+          | Stage | Status |
+          |-------|--------|
+          | 🔍 Code Quality | ${{ needs.code-quality.result }} |
+          | 🔒 Static Security | ${{ needs.static-security.result }} |
+          | 📦 Dependency Security | ${{ needs.dependency-security.result }} |
+          | 🧪 Test Suite | ${{ needs.test-suite.result }} |
+          | 🐳 Docker Build | ${{ needs.docker-build.result }} |
+          | 🛡️ Container Security | ${{ needs.container-security.result }} |
+
+          ### Summary
+          EOF
+
+          # Determine overall status
+          if [[ "${{ needs.code-quality.result }}" == "success" && \
+                "${{ needs.test-suite.result }}" == "success" ]]; then
+            echo "✅ **All critical checks passed!** Ready for review and merge." >> pr-summary.md
+          else
+            echo "❌ **Some checks failed.** Please review the errors above." >> pr-summary.md
+          fi
+
+          echo "" >> pr-summary.md
+          echo "### Details" >> pr-summary.md
+          echo "- **Branch**: \`${{ github.head_ref }}\` → \`${{ github.base_ref }}\`" >> pr-summary.md
+          echo "- **Commit**: \`${{ github.event.pull_request.head.sha }}\`" >> pr-summary.md
+          echo "- **Version**: ${{ needs.build-config.outputs.version || 'N/A' }}" >> pr-summary.md
+          echo "- **Milestone**: ${{ needs.build-config.outputs.milestone || 'M0' }}" >> pr-summary.md
+          echo "" >> pr-summary.md
+          echo "### Quick Links" >> pr-summary.md
+          echo "- [View Full Pipeline](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> pr-summary.md
+          echo "- [View Artifacts](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts)" >> pr-summary.md
+          echo "" >> pr-summary.md
+          echo "---" >> pr-summary.md
+          echo "_Updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')_" >> pr-summary.md
+
+      - name: Find existing comment
+        uses: peter-evans/find-comment@v2
+        id: find-comment
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '<!-- harbor-pr-comment:pipeline-summary -->'
+
+      - name: Update PR comment
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: pr-summary.md
+          edit-mode: replace

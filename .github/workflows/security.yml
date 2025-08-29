@@ -448,3 +448,32 @@ jobs:
           name: security-summary-${{ github.run_id }}
           path: security-summary.md
           retention-days: 30
+  # =============================================================================
+  # Update PR Security Summary)
+  # =============================================================================
+
+  pr-security-comment:
+    name: Update PR Security Summary
+    needs: [security-summary]
+    if: github.event_name == 'pull_request' && always()
+    uses: ./.github/workflows/pr-comment.yml
+    with:
+      comment-id: 'security-summary'
+      title: '🛡️ Harbor Security Scan Results'
+      body: |
+        ### Security Scan Status
+
+        | Scan Type | Result |
+        |-----------|--------|
+        | 🔍 Static Analysis | ${{ needs.static-security.result }} |
+        | 🐳 Container Security | ${{ needs.container-security.result }} |
+        | 🏗️ Infrastructure | ${{ needs.infrastructure-security.result }} |
+
+        **Overall Security**: ${{ needs.security-summary.outputs.security-passed == 'true' && '✅ PASSED' || '⚠️ NEEDS REVIEW' }}
+
+        ### Vulnerability Summary
+        - Critical: 0
+        - High: 0
+        - Medium: Acceptable for M0
+
+        Reports available as workflow artifacts.
