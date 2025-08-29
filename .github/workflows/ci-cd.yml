@@ -18,7 +18,7 @@ permissions:
 
 env:
   # Global environment variables
-  HARBOR_VERSION: "0.1.0-alpha.2"
+  HARBOR_VERSION: "0.1.0-alpha.3"
   HARBOR_MILESTONE: "M0"
   REGISTRY_IMAGE_DOCKERHUB: dextaco/harbor
   REGISTRY_IMAGE_GHCR: ghcr.io/deusextaco/harbor
@@ -90,27 +90,41 @@ jobs:
       - name: Configure build strategy
         id: config
         run: |
+          # Extract version from app/__init__.py (source of truth)
+          if [ -f "app/__init__.py" ]; then
+            VERSION=$(python -c "
+          import re
+          with open('app/__init__.py', 'r') as f:
+              content = f.read()
+              match = re.search(r'__version__ = [\"']([^\"']+)[\"']', content)
+              if match:
+                  print(match.group(1))
+          " || echo "${{ env.HARBOR_VERSION }}")
+
+            # Also extract milestone from app/__init__.py
+            MILESTONE=$(python -c "
+          import re
+          with open('app/__init__.py', 'r') as f:
+              content = f.read()
+              match = re.search(r'__milestone__ = [\"']([^\"']+)[\"']', content)
+              if match:
+                  print(match.group(1))
+          " || echo "${{ env.HARBOR_MILESTONE }}")
+          else
+            # Fallback to environment variables
+            VERSION="${{ env.HARBOR_VERSION }}"
+            MILESTONE="${{ env.HARBOR_MILESTONE }}"
+          fi
+
           # Determine if this is a release (tag push)
           if [[ "${{ github.ref_type }}" == "tag" && "${{ github.ref }}" == refs/tags/v* ]]; then
             echo "is-release=true" >> $GITHUB_OUTPUT
             echo "should-build=true" >> $GITHUB_OUTPUT
 
-            # Extract version from tag
-            VERSION="${{ github.ref_name }}"  # e.g., v0.1.0-alpha.2
+            # Use version from tag
+            VERSION="${{ github.ref_name }}"  # e.g., v0.1.0-alpha.3
             VERSION_CLEAN="${VERSION#v}"      # Remove 'v' prefix
             echo "version=$VERSION_CLEAN" >> $GITHUB_OUTPUT
-
-            # Determine milestone from version
-            case "$VERSION_CLEAN" in
-              0.1.*) MILESTONE="M0" ;;
-              0.2.*) MILESTONE="M1" ;;
-              0.3.*) MILESTONE="M2" ;;
-              0.4.*) MILESTONE="M3" ;;
-              0.5.*) MILESTONE="M4" ;;
-              0.6.*) MILESTONE="M5" ;;
-              1.0.*) MILESTONE="M6" ;;
-              *) MILESTONE="M0" ;;
-            esac
             echo "milestone=$MILESTONE" >> $GITHUB_OUTPUT
 
             # Check if prerelease
@@ -129,8 +143,8 @@ jobs:
           elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             echo "is-release=false" >> $GITHUB_OUTPUT
             echo "should-build=true" >> $GITHUB_OUTPUT
-            echo "version=${{ env.HARBOR_VERSION }}" >> $GITHUB_OUTPUT
-            echo "milestone=${{ env.HARBOR_MILESTONE }}" >> $GITHUB_OUTPUT
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "milestone=$MILESTONE" >> $GITHUB_OUTPUT
             echo "is-prerelease=false" >> $GITHUB_OUTPUT
 
             # Set development tags
@@ -142,21 +156,21 @@ jobs:
           elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
             echo "is-release=false" >> $GITHUB_OUTPUT
             echo "should-build=true" >> $GITHUB_OUTPUT
-            echo "version=${{ env.HARBOR_VERSION }}-dev" >> $GITHUB_OUTPUT
-            echo "milestone=${{ env.HARBOR_MILESTONE }}" >> $GITHUB_OUTPUT
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "milestone=$MILESTONE" >> $GITHUB_OUTPUT
             echo "is-prerelease=true" >> $GITHUB_OUTPUT
 
-            # Set develop tags
-            echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:develop" >> $GITHUB_OUTPUT
-            echo "ghcr-tags=${{ env.REGISTRY_IMAGE_GHCR }}:develop" >> $GITHUB_OUTPUT
+            # Set develop tags with version
+            echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:develop,${{ env.REGISTRY_IMAGE_DOCKERHUB }}:$VERSION" >> $GITHUB_OUTPUT
+            echo "ghcr-tags=${{ env.REGISTRY_IMAGE_GHCR }}:develop,${{ env.REGISTRY_IMAGE_GHCR }}:$VERSION" >> $GITHUB_OUTPUT
 
             echo "🔧 DEVELOP BRANCH BUILD"
 
           else
             echo "is-release=false" >> $GITHUB_OUTPUT
             echo "should-build=false" >> $GITHUB_OUTPUT
-            echo "version=${{ env.HARBOR_VERSION }}" >> $GITHUB_OUTPUT
-            echo "milestone=${{ env.HARBOR_MILESTONE }}" >> $GITHUB_OUTPUT
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "milestone=$MILESTONE" >> $GITHUB_OUTPUT
             echo "is-prerelease=false" >> $GITHUB_OUTPUT
 
             echo "📝 PULL REQUEST - Build skipped"
@@ -170,79 +184,13 @@ jobs:
     name: Docker Build & Publish
     needs: [build-config]
     if: needs.build-config.outputs.should-build == 'true'
-    runs-on: ubuntu-latest
-
-    outputs:
-      build-successful: ${{ steps.build-result.outputs.success }}
-      image-tags: ${{ steps.build-result.outputs.tags }}
-      image-digest: ${{ steps.build.outputs.digest }}
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        if: env.REGISTRY_IMAGE_DOCKERHUB != ''
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            ${{ env.REGISTRY_IMAGE_DOCKERHUB }}
-            ${{ env.REGISTRY_IMAGE_GHCR }}
-          labels: |
-            org.opencontainers.image.title=Harbor Container Updater
-            org.opencontainers.image.description=Automated Docker container updates for home labs and enterprises
-            org.opencontainers.image.source=https://github.com/DeusExTaco/harbor
-            org.opencontainers.image.documentation=https://harbor-docs.dev
-            org.opencontainers.image.licenses=MIT
-            org.opencontainers.image.vendor=Harbor Team
-            org.opencontainers.image.version=${{ needs.build-config.outputs.version }}
-            harbor.milestone=${{ needs.build-config.outputs.milestone }}
-            harbor.deployment-profile=homelab
-            harbor.is-release=${{ needs.build-config.outputs.is-release }}
-
-      - name: Build and push Docker images
-        id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: deploy/docker/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ needs.build-config.outputs.docker-tags }}
-            ${{ needs.build-config.outputs.ghcr-tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          provenance: true
-          sbom: true
-
-      - name: Set build result
-        id: build-result
-        run: |
-          echo "success=true" >> $GITHUB_OUTPUT
-          echo "tags=${{ needs.build-config.outputs.docker-tags }},${{ needs.build-config.outputs.ghcr-tags }}" >> $GITHUB_OUTPUT
-          echo "🐳 Build completed successfully!"
+    uses: ./.github/workflows/docker-build.yml
+    secrets: inherit # pragma: allowlist secret
+    with:
+      force-build: false
 
   # =============================================================================
-  # Stage 5: Container Security Scanning
+  # Stage 5: Complete Container Security Scanning
   # =============================================================================
 
   container-security:
@@ -258,7 +206,7 @@ jobs:
       image-tags: ${{ needs.docker-build.outputs.image-tags }}
 
   # =============================================================================
-  # Stage 6: GitHub Release Creation (Only for tags)
+  # Stage 6: GitHub Release Creation (Only for tags) - SIMPLIFIED
   # =============================================================================
 
   create-github-release:
@@ -280,56 +228,38 @@ jobs:
         with:
           fetch-depth: 0  # Need full history for changelog
 
-      - name: Generate release notes
+      - name: Generate simple release notes
         id: release-notes
         run: |
           VERSION="${{ needs.build-config.outputs.version }}"
           MILESTONE="${{ needs.build-config.outputs.milestone }}"
 
-          # Get previous tag for changelog
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          # Create simple, focused release notes
+          cat > release-notes.md << 'EOF'
+          ## Harbor VERSION_PLACEHOLDER - MILESTONE_PLACEHOLDER
 
-          # Create release notes
-          cat > release-notes.md << EOF
-          Harbor Container Updater $VERSION - $MILESTONE Milestone
+          ### Quick Start
+          ```bash
+          docker run -d --name harbor -p 8080:8080 \
+            -v /var/run/docker.sock:/var/run/docker.sock:ro \
+            ghcr.io/deusextaco/harbor:VERSION_PLACEHOLDER
+          ```
 
-          🎯 **$MILESTONE Phase**: $([ "$MILESTONE" = "M0" ] && echo "Foundation Complete" || echo "Development Phase")
+          ### What's New
+          See [CHANGELOG.md](https://github.com/DeusExTaco/harbor/blob/vVERSION_PLACEHOLDER/CHANGELOG.md) for details.
 
-          ## 🚀 Quick Start
-          \`\`\`bash
-          docker run -d --name harbor --restart unless-stopped \\
-            -p 8080:8080 \\
-            -v /var/run/docker.sock:/var/run/docker.sock:ro \\
-            ghcr.io/deusextaco/harbor:$VERSION
-          \`\`\`
+          ### Docker Images
+          - `ghcr.io/deusextaco/harbor:VERSION_PLACEHOLDER`
+          - `dextaco/harbor:VERSION_PLACEHOLDER`
 
-          Dashboard: http://localhost:8080
-
-          ## 📦 Available Images
-          - \`ghcr.io/deusextaco/harbor:$VERSION\`
-          - \`dextaco/harbor:$VERSION\`
-
-          ## 🏗️ M0 Foundation Features
-          - ✅ FastAPI-based web framework with automatic OpenAPI documentation
-          - ✅ Zero-configuration deployment for home labs
-          - ✅ SQLite database with automatic migrations
-          - ✅ Profile-based configuration (homelab, development, production)
-          - ✅ Comprehensive health checks and monitoring endpoints
-          - ✅ Complete CI/CD pipeline with multi-stage testing
-          - ✅ Security scanning and vulnerability detection
-          - ✅ Development environment with hot reload
-          - ✅ Release automation with semantic versioning
-
-          ## 🛣️ What's Next
-
-          **M1 Milestone (Container Discovery & Registry Integration)**
-          - Automatic container discovery with change detection
-          - Multi-registry support (Docker Hub, GHCR, private registries)
-          - Intelligent caching and rate limiting
-          - Container specification analysis and tracking
-
-          See full changelog and technical details at: https://github.com/DeusExTaco/harbor/releases/tag/v$VERSION
+          ### Documentation
+          - [Getting Started](https://github.com/DeusExTaco/harbor/blob/vVERSION_PLACEHOLDER/README.md)
+          - [Configuration](https://github.com/DeusExTaco/harbor/tree/vVERSION_PLACEHOLDER/config)
           EOF
+
+          # Replace placeholders
+          sed -i "s/VERSION_PLACEHOLDER/$VERSION/g" release-notes.md
+          sed -i "s/MILESTONE_PLACEHOLDER/$MILESTONE/g" release-notes.md
 
           echo "notes<<EOF" >> $GITHUB_OUTPUT
           cat release-notes.md >> $GITHUB_OUTPUT
@@ -337,25 +267,16 @@ jobs:
 
       - name: Create GitHub Release
         id: create-release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ needs.build-config.outputs.version }}
-          release_name: Harbor ${{ needs.build-config.outputs.version }} - ${{ needs.build-config.outputs.milestone }} Milestone
-          body: ${{ steps.release-notes.outputs.notes }}
+          name: Harbor ${{ needs.build-config.outputs.version }} - ${{ needs.build-config.outputs.milestone }}
+          body_path: release-notes.md
           draft: false
           prerelease: ${{ needs.build-config.outputs.is-prerelease }}
-
-      - name: Upload Docker Compose example
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create-release.outputs.upload_url }}
-          asset_path: examples/home-lab/basic/docker-compose.yml
-          asset_name: docker-compose-homelab.yml
-          asset_content_type: application/x-yaml
+          generate_release_notes: true  # GitHub auto-generates from PRs
+          files: |
+            examples/home-lab/basic/docker-compose.yml
 
   # =============================================================================
   # Stage 7: Final Status & Summary
@@ -379,16 +300,16 @@ jobs:
           echo "" >> pipeline-summary.md
 
           echo "## 📊 Pipeline Results" >> pipeline-summary.md
-          echo "| Stage | Status | Duration |" >> pipeline-summary.md
-          echo "|-------|--------|----------|" >> pipeline-summary.md
-          echo "| 🔍 Code Quality | ${{ needs.code-quality.result }} | - |" >> pipeline-summary.md
-          echo "| 🔒 Static Security | ${{ needs.static-security.result }} | - |" >> pipeline-summary.md
-          echo "| 📦 Dependency Security | ${{ needs.dependency-security.result }} | - |" >> pipeline-summary.md
-          echo "| 🧪 Test Suite | ${{ needs.test-suite.result }} | - |" >> pipeline-summary.md
-          echo "| 🏗️ Build Config | ${{ needs.build-config.result }} | - |" >> pipeline-summary.md
-          echo "| 🐳 Docker Build | ${{ needs.docker-build.result }} | - |" >> pipeline-summary.md
-          echo "| 🛡️ Container Security | ${{ needs.container-security.result }} | - |" >> pipeline-summary.md
-          echo "| 🚀 GitHub Release | ${{ needs.create-github-release.result }} | - |" >> pipeline-summary.md
+          echo "| Stage | Status |" >> pipeline-summary.md
+          echo "|-------|--------|" >> pipeline-summary.md
+          echo "| 🔍 Code Quality | ${{ needs.code-quality.result }} |" >> pipeline-summary.md
+          echo "| 🔒 Static Security | ${{ needs.static-security.result }} |" >> pipeline-summary.md
+          echo "| 📦 Dependency Security | ${{ needs.dependency-security.result }} |" >> pipeline-summary.md
+          echo "| 🧪 Test Suite | ${{ needs.test-suite.result }} |" >> pipeline-summary.md
+          echo "| 🗿 Build Config | ${{ needs.build-config.result }} |" >> pipeline-summary.md
+          echo "| 🐳 Docker Build | ${{ needs.docker-build.result }} |" >> pipeline-summary.md
+          echo "| 🛡️ Container Security | ${{ needs.container-security.result }} |" >> pipeline-summary.md
+          echo "| 🚀 GitHub Release | ${{ needs.create-github-release.result }} |" >> pipeline-summary.md
           echo "" >> pipeline-summary.md
 
           # Enhanced status determination
@@ -454,10 +375,10 @@ jobs:
               echo "- 📝 Update documentation if needed" >> pipeline-summary.md
             else
               echo "- 🔧 Fix release issues and re-tag if necessary" >> pipeline-summary.md
-              echo "- 📝 Check workflow logs for specific errors" >> pipeline-summary.md
+              echo "- 🔍 Check workflow logs for specific errors" >> pipeline-summary.md
             fi
           elif [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "- 📝 Review any failed checks above" >> pipeline-summary.md
+            echo "- 🔍 Review any failed checks above" >> pipeline-summary.md
             echo "- 🔧 Fix issues and push new commits" >> pipeline-summary.md
             echo "- ✅ Merge when all checks pass" >> pipeline-summary.md
           elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
