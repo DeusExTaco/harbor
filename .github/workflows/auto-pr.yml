@@ -18,8 +18,8 @@ jobs:
   create-pr:
     name: Create Pull Request
     runs-on: ubuntu-latest
-    # Only create PR if one doesn't already exist
-    if: github.event.created == true || github.event.forced == true
+
+    if: github.event_name == 'push' && github.event.pull_request == null
 
     steps:
       - name: Checkout code
