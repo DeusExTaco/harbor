@@ -50,6 +50,3 @@ Harbor is an open source project. See CONTRIBUTING.md for development setup.
 ## License
 
 MIT License - see LICENSE file for details.
-
-echo "" >> README.md
-echo "<!-- M0 Foundation Complete -->" >> README.md

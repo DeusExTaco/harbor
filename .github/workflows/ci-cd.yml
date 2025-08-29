@@ -190,7 +190,7 @@ jobs:
       force-build: false
 
   # =============================================================================
-  # Stage 5: Container Security Scanning
+  # Stage 5: Complete Container Security Scanning
   # =============================================================================
 
   container-security:

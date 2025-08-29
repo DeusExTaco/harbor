@@ -515,7 +515,7 @@ jobs:
           retention-days: 30
 
   # =============================================================================
-  # Dependency Summary and Status
+  # Dependency Summary and Status - Generates Report
   # =============================================================================
   dependency-summary:
     name: Dependency Review Summary
