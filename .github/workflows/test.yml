@@ -326,35 +326,65 @@ jobs:
 
   # =============================================================================
   # PR Test Summary Updating
-  # =============================================================================    # Add this job to test.yml after test-summary job
+  # =============================================================================
 
   pr-comment:
-    name: Update PR Test Summary
-    needs: [test-summary]
-    if: github.event_name == 'pull_request' && always()
-    uses: ./.github/workflows/pr-comment.yml
-    with:
-      comment-id: 'test-summary'
-      title: '🧪 Harbor Test Results'
-      body: |
-        ### Test Suite Status
+      name: Update PR Test Summary
+      needs: [ test-summary ]
+      # Fix the condition - ensure we have a valid PR number
+      if: |
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.number != null &&
+        always()
+      runs-on: ubuntu-latest
 
-        | Component | Status |
-        |-----------|--------|
-        | 🔍 Code Quality | ${{ needs.quality.result }} |
-        | 🧪 Unit Tests | ${{ needs.test.result }} |
-        | 🐳 Docker Build | ${{ needs.docker.result }} |
-        | 📚 Documentation | ${{ needs.docs.result }} |
+      permissions:
+        pull-requests: write
+        issues: write
 
-        **Overall Result**: ${{ needs.test-summary.outputs.tests-passed == 'true' && '✅ PASSED' || '❌ FAILED' }}
+      steps:
+        - name: Generate test summary
+          run: |
+            cat > test-summary.md << 'EOF'
+            <!-- harbor-pr-comment:test-summary -->
+            ## 🧪 Harbor Test Results
 
-        ### Details
-        - Python versions tested: 3.11, 3.12, 3.13
-        - Test coverage: View in artifacts
-        - Duration: ~${{ github.run_duration }} minutes
+            ### Test Suite Status
 
-        [View Full Test Report](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            | Component | Status |
+            |-----------|--------|
+            | 🔍 Code Quality | ${{ needs.quality.result }} |
+            | 🧪 Unit Tests | ${{ needs.test.result }} |
+            | 🐳 Docker Build | ${{ needs.docker.result }} |
+            | 📚 Documentation | ${{ needs.docs.result }} |
 
+            **Overall Result**: ${{ needs.test-summary.outputs.tests-passed == 'true' && '✅ PASSED' || '❌ FAILED' }}
+
+            ### Details
+            - Python versions tested: 3.11, 3.12, 3.13
+            - Test coverage: View in artifacts
+
+            [View Full Test Report](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            ---
+            _Updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')_
+            EOF
+
+        - name: Find existing comment
+          uses: peter-evans/find-comment@v2
+          id: find-comment
+          with:
+            issue-number: ${{ github.event.pull_request.number }}
+            comment-author: 'github-actions[bot]'
+            body-includes: '<!-- harbor-pr-comment:test-summary -->'
+
+        - name: Create or update comment
+          uses: peter-evans/create-or-update-comment@v3
+          with:
+            comment-id: ${{ steps.find-comment.outputs.comment-id }}
+            issue-number: ${{ github.event.pull_request.number }}
+            body-path: test-summary.md
+            edit-mode: replace
 
   # =============================================================================
   # Deployment Readiness Check (Only on main branch)

@@ -600,7 +600,10 @@ jobs:
   pr-pipeline-comment:
     name: Update PR Pipeline Summary
     needs: [ code-quality, static-security, dependency-security, test-suite, build-config, docker-build, container-security, create-github-release, pipeline-summary ]
-    if: github.event_name == 'pull_request' && always()
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.number != null &&
+      always()
     runs-on: ubuntu-latest
 
     permissions:

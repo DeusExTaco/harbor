@@ -455,7 +455,10 @@ jobs:
   pr-security-comment:
     name: Update PR Security Summary
     needs: [security-summary]
-    if: github.event_name == 'pull_request' && always()
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.number != null &&
+      always()
     uses: ./.github/workflows/pr-comment.yml
     with:
       comment-id: 'security-summary'
