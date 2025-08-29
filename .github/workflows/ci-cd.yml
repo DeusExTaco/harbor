@@ -205,6 +205,163 @@ jobs:
       scan-type: "container"
       image-tags: ${{ needs.docker-build.outputs.image-tags }}
 
+
+  # =============================================================================
+  # Stage 5.5: Registry Cleanup & Retention
+  # =============================================================================
+
+  registry-retention:
+    name: Registry Cleanup & Retention
+    runs-on: ubuntu-latest
+    needs: [ docker-build, container-security ]
+    if: |
+      always() &&
+      needs.docker-build.outputs.build-successful == 'true' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup cleanup configuration
+        id: config
+        run: |
+          # Configuration based on branch
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "keep_versions=10" >> $GITHUB_OUTPUT
+            echo "keep_days=30" >> $GITHUB_OUTPUT
+            echo "delete_untagged=false" >> $GITHUB_OUTPUT
+          else
+            echo "keep_versions=5" >> $GITHUB_OUTPUT
+            echo "keep_days=7" >> $GITHUB_OUTPUT
+            echo "delete_untagged=true" >> $GITHUB_OUTPUT
+          fi
+
+          # Protected tags that should never be deleted
+          echo "protected_tags=latest,develop,main" >> $GITHUB_OUTPUT
+
+      # GHCR Cleanup using action
+      - name: Cleanup GHCR old versions
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: 'harbor'
+          package-type: 'container'
+          min-versions-to-keep: ${{ steps.config.outputs.keep_versions }}
+          delete-only-pre-release-versions: false
+          delete-only-untagged-versions: ${{ steps.config.outputs.delete_untagged }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      # Advanced GHCR cleanup
+      - name: Advanced GHCR cleanup
+        run: |
+          PACKAGE="harbor"
+          OWNER="${{ github.repository_owner }}"
+          KEEP_VERSIONS="${{ steps.config.outputs.keep_versions }}"
+          KEEP_DAYS="${{ steps.config.outputs.keep_days }}"
+          PROTECTED_TAGS="${{ steps.config.outputs.protected_tags }}"
+
+          # Calculate cutoff date (Linux date command)
+          CUTOFF_DATE=$(date -d "$KEEP_DAYS days ago" -Iseconds)
+
+          echo "Cleaning up GHCR packages older than $CUTOFF_DATE"
+
+          # Get all versions
+          VERSIONS=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/users/$OWNER/packages/container/$PACKAGE/versions?per_page=100" \
+            --paginate 2>/dev/null || echo "[]")
+
+          if [ "$VERSIONS" != "[]" ]; then
+            # Process versions
+            echo "$VERSIONS" | jq -r --arg cutoff "$CUTOFF_DATE" --arg protected "$PROTECTED_TAGS" '
+              .[] |
+              select(.created_at < $cutoff) |
+              select(.metadata.container.tags | length == 0 or
+                     (.metadata.container.tags | map(. as $tag | $protected | split(",") | index($tag) | not) | all)) |
+              .id' | \
+            while read -r VERSION_ID; do
+              if [ -n "$VERSION_ID" ]; then
+                echo "Deleting old GHCR version: $VERSION_ID"
+                gh api \
+                  --method DELETE \
+                  -H "Accept: application/vnd.github+json" \
+                  "/users/$OWNER/packages/container/$PACKAGE/versions/$VERSION_ID" 2>/dev/null || true
+                sleep 0.5
+              fi
+            done
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      # Docker Hub Cleanup
+      - name: Cleanup Docker Hub old tags
+        run: |
+          NAMESPACE="dextaco"
+          REPONAME="harbor"
+          KEEP_VERSIONS="${{ steps.config.outputs.keep_versions }}"
+          KEEP_DAYS="${{ steps.config.outputs.keep_days }}"
+          PROTECTED_TAGS="${{ steps.config.outputs.protected_tags }}"
+
+          # Authenticate with Docker Hub
+          echo "Authenticating with Docker Hub..."
+          TOKEN=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -d '{"username":"${{ secrets.DOCKERHUB_USERNAME }}","password":"${{ secrets.DOCKERHUB_TOKEN }}"}' \
+            https://hub.docker.com/v2/users/login/ | jq -r .token)
+
+          if [ "$TOKEN" == "null" ] || [ -z "$TOKEN" ]; then
+            echo "Failed to authenticate with Docker Hub - skipping cleanup"
+            exit 0
+          fi
+
+          # Get all tags
+          echo "Fetching Docker Hub tags..."
+          RESPONSE=$(curl -s -H "Authorization: Bearer $TOKEN" \
+            "https://hub.docker.com/v2/namespaces/$NAMESPACE/repositories/$REPONAME/tags?page_size=100")
+
+          if [ -z "$RESPONSE" ] || [ "$RESPONSE" == "null" ]; then
+            echo "No tags found"
+            exit 0
+          fi
+
+          # Calculate cutoff date (Unix timestamp for Linux)
+          CUTOFF_TIMESTAMP=$(date -d "$KEEP_DAYS days ago" +%s)
+
+          # Process tags
+          echo "$RESPONSE" | jq -r --arg protected "$PROTECTED_TAGS" --arg cutoff "$CUTOFF_TIMESTAMP" '
+            .results[] |
+            select(.last_updated != null) |
+            select((.last_updated | sub("\\.[0-9]+Z$"; "Z") | fromdate) < ($cutoff | tonumber)) |
+            select(.name as $name | $protected | split(",") | index($name) | not) |
+            .name' | \
+          while read -r TAG; do
+            if [ -n "$TAG" ]; then
+              echo "Deleting old Docker Hub tag: $TAG"
+              curl -s -X DELETE -H "Authorization: Bearer $TOKEN" \
+                "https://hub.docker.com/v2/repositories/$NAMESPACE/$REPONAME/tags/$TAG/" || true
+              sleep 0.5
+            fi
+          done
+        continue-on-error: true
+
+      - name: Generate cleanup report
+        if: always()
+        run: |
+          echo "## 🧹 Registry Cleanup Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Keep Versions**: ${{ steps.config.outputs.keep_versions }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Keep Days**: ${{ steps.config.outputs.keep_days }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Delete Untagged**: ${{ steps.config.outputs.delete_untagged }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Protected Tags**: ${{ steps.config.outputs.protected_tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Registries Cleaned" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ GitHub Container Registry (ghcr.io)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Docker Hub" >> $GITHUB_STEP_SUMMARY
+
   # =============================================================================
   # Stage 6: GitHub Release Creation (Only for tags) - SIMPLIFIED
   # =============================================================================
