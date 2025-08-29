@@ -9,7 +9,7 @@ on:
         default: 'all'
         type: string
       image-tags:
-        description: 'Docker image tags to scan'
+        description: 'Docker image tags to scan (comma-separated)'
         required: false
         type: string
       force-container-scan:
@@ -70,18 +70,18 @@ jobs:
           # Install from your requirements structure
           if [ -f "requirements/base.txt" ]; then
             echo "📦 Installing base requirements..."
-            pip install -r requirements/base.txt || echo "⚠️  Some base dependencies failed to install"
+            pip install -r requirements/base.txt || echo "⚠️ Some base dependencies failed to install"
           fi
 
           if [ -f "requirements/development.txt" ]; then
             echo "📦 Installing development requirements..."
-            pip install -r requirements/development.txt || echo "⚠️  Some dev dependencies failed to install"
+            pip install -r requirements/development.txt || echo "⚠️ Some dev dependencies failed to install"
           fi
 
           # Install from pyproject.toml if available
           if [ -f "pyproject.toml" ]; then
             echo "📦 Installing from pyproject.toml..."
-            pip install -e . || echo "⚠️  Project installation failed - this is expected during M0"
+            pip install -e . || echo "⚠️ Project installation failed - this is expected during M0"
           fi
 
       - name: Run secret detection scan
@@ -98,22 +98,22 @@ jobs:
           # Only scan if app directory exists with Python files
           if [ -d "app" ] && find app -name "*.py" -type f | head -1 > /dev/null; then
             echo "🔒 Running Bandit on app/ directory..."
-            bandit -r app/ -f json -o bandit-report.json || echo "⚠️  Bandit found issues"
+            bandit -r app/ -f json -o bandit-report.json || echo "⚠️ Bandit found issues"
           else
-            echo "ℹ️  No Python files found in app/ directory"
+            echo "ℹ️ No Python files found in app/ directory"
             echo '{"results": [], "metrics": {"_totals": {"loc": 0, "nosec": 0, "skipped_tests": 0}}}' > bandit-report.json
           fi
 
       - name: Run pip-audit for dependency vulnerabilities
         run: |
           echo "🔍 Running pip-audit on installed packages..."
-          pip-audit --format=json --output=pip-audit-report.json || echo "⚠️  pip-audit completed with findings"
+          pip-audit --format=json --output=pip-audit-report.json || echo "⚠️ pip-audit completed with findings"
 
       - name: Run safety check
         run: |
           echo "🔍 Running safety check..."
           if command -v safety > /dev/null; then
-            safety check --json --output=safety-report.json || echo "⚠️  Safety check completed with findings"
+            safety check --json --output=safety-report.json || echo "⚠️ Safety check completed with findings"
           else
             echo '{"vulnerabilities": []}' > safety-report.json
           fi
@@ -172,14 +172,14 @@ jobs:
             # Try to determine images based on event type
             if [ "${{ github.event_name }}" = "schedule" ]; then
               # For scheduled scans, scan latest images
-              IMAGES_TO_SCAN="dextaco/harbor:latest ghcr.io/deusextaco/harbor:latest"
+              IMAGES_TO_SCAN="dextaco/harbor:latest,ghcr.io/deusextaco/harbor:latest"
               echo "⏰ Scheduled scan - using latest tags"
             elif [ "${{ github.event_name }}" = "push" ]; then
               # For push events, try to scan branch-specific tags
               if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-                IMAGES_TO_SCAN="dextaco/harbor:latest ghcr.io/deusextaco/harbor:latest"
+                IMAGES_TO_SCAN="dextaco/harbor:latest,ghcr.io/deusextaco/harbor:latest"
               elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
-                IMAGES_TO_SCAN="dextaco/harbor:develop ghcr.io/deusextaco/harbor:develop"
+                IMAGES_TO_SCAN="dextaco/harbor:develop,ghcr.io/deusextaco/harbor:develop"
               fi
             fi
           fi
@@ -187,11 +187,11 @@ jobs:
           if [ -z "$IMAGES_TO_SCAN" ] && [ "${{ inputs.force-container-scan }}" = "true" ]; then
             # Force scan - try to build local image
             echo "🔧 Force scan requested - attempting local build..."
-            if docker build -t harbor:security-scan -f deploy/docker/Dockerfile.dev .; then
+            if [ -f "deploy/docker/Dockerfile.dev" ] && docker build -t harbor:security-scan -f deploy/docker/Dockerfile.dev .; then
               IMAGES_TO_SCAN="harbor:security-scan"
               echo "✅ Local build succeeded"
             else
-              echo "❌ Local build failed"
+              echo "⚠️ Local build failed or Dockerfile not found"
             fi
           fi
 
@@ -200,24 +200,26 @@ jobs:
             echo "✅ Images to scan: $IMAGES_TO_SCAN"
           else
             echo "images-scanned=" >> $GITHUB_OUTPUT
-            echo "ℹ️  No images available for scanning"
+            echo "ℹ️ No images available for scanning"
           fi
 
       # Login to registries (for pulling images)
       - name: Log in to Docker Hub
-        if: contains(steps.scan-images.outputs.images-scanned, 'dextaco/harbor')
+        if: steps.scan-images.outputs.images-scanned != '' && contains(steps.scan-images.outputs.images-scanned, 'dextaco/harbor')
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}  # pragma: allowlist secret
           password: ${{ secrets.DOCKERHUB_TOKEN }}  # pragma: allowlist secret
+        continue-on-error: true
 
       - name: Log in to GitHub Container Registry
-        if: contains(steps.scan-images.outputs.images-scanned, 'ghcr.io')
+        if: steps.scan-images.outputs.images-scanned != '' && contains(steps.scan-images.outputs.images-scanned, 'ghcr.io')
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}  # pragma: allowlist secret
+        continue-on-error: true
 
       - name: Run Trivy container vulnerability scan
         if: steps.scan-images.outputs.images-scanned != ''
@@ -227,45 +229,77 @@ jobs:
           # Create results directory
           mkdir -p trivy-results
 
-          # Scan each image
-          for image in ${{ steps.scan-images.outputs.images-scanned }}; do
+          # Convert comma-separated list to array and iterate
+          IFS=',' read -ra IMAGE_ARRAY <<< "${{ steps.scan-images.outputs.images-scanned }}"
+
+          for image in "${IMAGE_ARRAY[@]}"; do
+            # Trim whitespace
+            image=$(echo "$image" | xargs)
+
             echo "📦 Scanning image: $image"
 
             # Pull image first (if not local)
             if [[ "$image" != *"harbor:security-scan"* ]]; then
-              docker pull "$image" || echo "⚠️  Failed to pull $image"
+              if docker pull "$image"; then
+                echo "✅ Successfully pulled $image"
+              else
+                echo "⚠️ Failed to pull $image - skipping scan"
+                continue
+              fi
             fi
 
             # Create safe filename
             safe_name=$(echo "$image" | sed 's/[^a-zA-Z0-9]/-/g')
 
-            # Run Trivy scan
-            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            # Run Trivy scan (using correct image name: aquasec/trivy)
+            if docker run --rm \
+              -v /var/run/docker.sock:/var/run/docker.sock \
               -v ${{ github.workspace }}/trivy-results:/workspace \
-              aquasecurity/trivy:latest image \
+              aquasec/trivy:latest image \
               --format json \
               --output "/workspace/trivy-${safe_name}.json" \
               --severity HIGH,CRITICAL \
-              "$image" || echo "⚠️  Trivy scan completed with findings for $image"
+              "$image"; then
+              echo "✅ Trivy scan completed successfully for $image"
+            else
+              echo "⚠️ Trivy scan completed with findings for $image"
+            fi
 
             # Also create table format for readable output
-            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-              aquasecurity/trivy:latest image \
+            docker run --rm \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              aquasec/trivy:latest image \
               --format table \
               --severity HIGH,CRITICAL \
-              "$image" || echo "⚠️  Trivy table scan completed with findings for $image"
+              "$image" || true
           done
+
+          # Check if any results were created
+          if ls trivy-results/*.json 1> /dev/null 2>&1; then
+            echo "✅ Trivy scans generated results"
+          else
+            echo "⚠️ No Trivy scan results generated"
+          fi
 
       - name: Run Trivy filesystem scan
         run: |
           echo "🔍 Running Trivy filesystem scan..."
-          docker run --rm \
+
+          # Ensure results directory exists
+          mkdir -p trivy-results
+
+          # Run filesystem scan (using correct image name: aquasec/trivy)
+          if docker run --rm \
             -v ${{ github.workspace }}:/workspace \
-            aquasecurity/trivy:latest fs \
+            aquasec/trivy:latest fs \
             --format json \
             --output /workspace/trivy-results/trivy-filesystem.json \
             --severity HIGH,CRITICAL \
-            /workspace || echo "⚠️  Trivy filesystem scan completed with findings"
+            /workspace; then
+            echo "✅ Trivy filesystem scan completed successfully"
+          else
+            echo "⚠️ Trivy filesystem scan completed with findings"
+          fi
 
       - name: Set container security result
         id: container-result
@@ -276,7 +310,7 @@ jobs:
             echo "✅ Container security scans completed"
           else
             echo "passed=true" >> $GITHUB_OUTPUT
-            echo "ℹ️  No containers scanned - marking as passed"
+            echo "ℹ️ No containers scanned - marking as passed"
           fi
 
       - name: Upload container security reports
@@ -286,6 +320,7 @@ jobs:
           name: container-security-reports-${{ github.run_id }}
           path: trivy-results/
           retention-days: 30
+          if-no-files-found: warn
 
   # =============================================================================
   # Infrastructure Security
@@ -309,11 +344,18 @@ jobs:
         run: |
           pip install checkov
           echo "🔍 Running Checkov security scan..."
+
+          # Create output directory
+          mkdir -p security-reports
+
+          # Run Checkov with appropriate frameworks for M0
           checkov --directory . \
-            --framework dockerfile,github_actions,secrets \
+            --framework dockerfile \
+            --framework github_actions \
+            --framework secrets \
             --output json \
-            --output-file checkov-report.json \
-            --soft-fail || echo "⚠️  Checkov scan completed with findings"
+            --output-file security-reports/checkov-report.json \
+            --soft-fail || echo "⚠️ Checkov scan completed with findings"
 
       - name: Set infrastructure security result
         id: infra-result
@@ -326,8 +368,9 @@ jobs:
         if: always()
         with:
           name: infrastructure-security-report-${{ github.run_id }}
-          path: checkov-report.json
+          path: security-reports/checkov-report.json
           retention-days: 30
+          if-no-files-found: warn
 
   # =============================================================================
   # Security Summary (Aggregates all results)
