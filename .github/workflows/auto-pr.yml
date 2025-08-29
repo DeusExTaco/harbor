@@ -18,8 +18,8 @@ jobs:
   create-pr:
     name: Create Pull Request
     runs-on: ubuntu-latest
-
-    if: github.event_name == 'push' && github.event.pull_request == null
+    # Fixed condition - triggers on any push to matching branches
+    if: github.event_name == 'push'
 
     steps:
       - name: Checkout code
@@ -64,11 +64,16 @@ jobs:
         id: commits
         run: |
           # Get commit count and messages
-          COMMIT_COUNT=$(git rev-list --count origin/develop..HEAD)
+          COMMIT_COUNT=$(git rev-list --count origin/develop..HEAD 2>/dev/null || echo "0")
           echo "count=$COMMIT_COUNT" >> $GITHUB_OUTPUT
 
           # Get commit messages for the PR body
-          COMMITS=$(git log --pretty=format:"- %s" origin/develop..HEAD)
+          if [ "$COMMIT_COUNT" -gt 0 ]; then
+            COMMITS=$(git log --pretty=format:"- %s" origin/develop..HEAD --no-merges 2>/dev/null || echo "- No commits found")
+          else
+            COMMITS="- No commits found"
+          fi
+
           echo "messages<<EOF" >> $GITHUB_OUTPUT
           echo "$COMMITS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -77,7 +82,7 @@ jobs:
         id: check-pr
         run: |
           # Check if a PR already exists for this branch
-          PR_EXISTS=$(gh pr list --head "${{ steps.branch-info.outputs.branch }}" --json number --jq '.[0].number' || echo "")
+          PR_EXISTS=$(gh pr list --head "${{ steps.branch-info.outputs.branch }}" --json number --jq '.[0].number' 2>/dev/null || echo "")
 
           if [ -n "$PR_EXISTS" ]; then
             echo "exists=true" >> $GITHUB_OUTPUT
@@ -88,7 +93,7 @@ jobs:
             echo "No PR exists yet for this branch"
           fi
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}  # Use PAT to allow PR to trigger other workflows
 
       - name: Create Pull Request
         if: steps.check-pr.outputs.exists == 'false'
@@ -142,12 +147,15 @@ jobs:
             --body-file pr-body.md \
             --base "$TARGET" \
             --head "${{ steps.branch-info.outputs.branch }}" \
-            --draft)
+            --draft 2>&1) || {
+            echo "Failed to create PR. Output: $PR_URL"
+            exit 1
+          }
 
           echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
           echo "✅ Created PR: $PR_URL"
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}  # Use PAT to allow PR to trigger other workflows
 
       - name: Add labels to PR
         if: steps.check-pr.outputs.exists == 'false' && steps.create-pr.outputs.pr_url != ''
@@ -157,21 +165,21 @@ jobs:
 
           # Add appropriate labels based on branch type
           if [[ "${{ steps.branch-info.outputs.branch }}" == feature/* ]]; then
-            gh pr edit $PR_NUMBER --add-label "enhancement"
+            gh pr edit $PR_NUMBER --add-label "enhancement" 2>/dev/null || echo "Label 'enhancement' not found"
           elif [[ "${{ steps.branch-info.outputs.branch }}" == fix/* ]]; then
-            gh pr edit $PR_NUMBER --add-label "bug"
+            gh pr edit $PR_NUMBER --add-label "bug" 2>/dev/null || echo "Label 'bug' not found"
           elif [[ "${{ steps.branch-info.outputs.branch }}" == docs/* ]]; then
-            gh pr edit $PR_NUMBER --add-label "documentation"
+            gh pr edit $PR_NUMBER --add-label "documentation" 2>/dev/null || echo "Label 'documentation' not found"
           elif [[ "${{ steps.branch-info.outputs.branch }}" == chore/* ]]; then
-            gh pr edit $PR_NUMBER --add-label "maintenance"
+            gh pr edit $PR_NUMBER --add-label "maintenance" 2>/dev/null || echo "Label 'maintenance' not found"
           fi
 
           # Add milestone if M0
-          if [[ "${{ steps.branch-info.outputs.branch }}" == */M0-* ]]; then
-            gh pr edit $PR_NUMBER --add-label "M0-foundation"
+          if [[ "${{ steps.branch-info.outputs.branch }}" == *M0-* ]]; then
+            gh pr edit $PR_NUMBER --add-label "M0-foundation" 2>/dev/null || echo "Label 'M0-foundation' not found"
           fi
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}  # Use PAT for consistency
 
       - name: Post comment with next steps
         if: steps.check-pr.outputs.exists == 'false' && steps.create-pr.outputs.pr_url != ''
@@ -199,4 +207,4 @@ jobs:
           - Add reviewer: \`gh pr edit $PR_NUMBER --add-reviewer USERNAME\`
           - Merge when ready: \`gh pr merge $PR_NUMBER --squash\`"
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}  # Use PAT for consistency
