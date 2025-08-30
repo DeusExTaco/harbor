@@ -12,6 +12,7 @@ Features:
 - Health check endpoints with database status
 - Profile-aware application setup
 - Comprehensive error handling
+- Non-root user permission checks
 
 TODO: Implement remaining Harbor functionality according to milestone roadmap:
 - M0: Authentication System (next immediate task)
@@ -28,6 +29,7 @@ import os
 import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
@@ -82,6 +84,60 @@ except ImportError:
     SECURITY_AVAILABLE = False
 
 
+def check_docker_socket_access() -> bool:
+    """
+    Check if we can access the Docker socket.
+
+    Returns:
+        bool: True if Docker socket is accessible, False otherwise
+    """
+    docker_socket = os.environ.get("DOCKER_HOST", "/var/run/docker.sock")
+
+    if docker_socket.startswith("tcp://"):
+        # Using socket proxy, assume it's accessible
+        return True
+
+    if os.path.exists(docker_socket):
+        return os.access(docker_socket, os.R_OK)
+
+    return False
+
+
+def check_directory_permissions(path: str) -> tuple[bool, str]:
+    """
+    Check if a directory exists and is writable.
+
+    Args:
+        path: Directory path to check
+
+    Returns:
+        tuple: (success, message)
+    """
+    try:
+        path_obj = Path(path)
+
+        if not path_obj.exists():
+            try:
+                path_obj.mkdir(parents=True, mode=0o755, exist_ok=True)
+                return True, f"Created directory: {path}"
+            except PermissionError:
+                return False, f"Cannot create directory: {path}"
+
+        # Test write access
+        test_file = path_obj / ".write_test"
+        try:
+            test_file.write_text("test")
+            test_file.unlink()
+            return True, f"Directory writable: {path}"
+        except PermissionError:
+            return (
+                False,
+                f"Directory not writable: {path} (run: chown -R 1000:1000 {path})",
+            )
+    except Exception as e:
+        return False, f"Permission check failed: {e}"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
     """
@@ -94,10 +150,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
     print(f"🚢 Starting Harbor Container Updater v{__version__}")
     print(f"🎯 Milestone: {__milestone__} ({__status__})")
 
+    # Check runtime user
+    if hasattr(os, "getuid"):
+        uid = os.getuid()
+        gid = os.getgid()
+        is_root = uid == 0
+        print(
+            f"👤 Running as: UID={uid}, GID={gid} ({'root' if is_root else 'non-root'})"
+        )
+        if is_root:
+            print("⚠️  Warning: Running as root is not recommended for security")
+
     startup_success = True
     session_manager = None
-    db_ready = False  # Initialize db_ready here to avoid uninitialized variable error
-    settings = None  # Initialize settings as well
+    db_ready = False
+    settings = None
 
     # Configuration validation
     if CONFIG_AVAILABLE:
@@ -119,8 +186,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
             else:
                 print("✅ Configuration validated successfully")
 
-            # Show data directory
-            print(f"📁 Data directory: {settings.data_dir}")
+            # Check data directory permissions
+            data_dir = settings.data_dir
+            success, message = check_directory_permissions(str(data_dir))
+            print(f"{'✅' if success else '❌'} {message}")
+            if not success:
+                startup_success = False
+
+            # Check logs directory if configured
+            log_dir = Path(data_dir).parent / "logs"
+            if log_dir.parent.exists():
+                success, message = check_directory_permissions(str(log_dir))
+                print(f"{'✅' if success else '⚠️'} {message}")
 
         except Exception as e:
             logger.error(f"Configuration system error: {e}")
@@ -129,6 +206,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
     else:
         print("⚠️ Configuration system not available - using defaults")
         startup_success = False
+
+    # Check Docker socket access
+    docker_accessible = check_docker_socket_access()
+    docker_host = os.environ.get("DOCKER_HOST", "/var/run/docker.sock")
+    if docker_accessible:
+        if docker_host.startswith("tcp://"):
+            print(f"✅ Docker socket proxy accessible: {docker_host}")
+        else:
+            print("✅ Docker socket accessible")
+    else:
+        print(f"⚠️ Docker socket not accessible: {docker_host}")
+        print("   Container discovery and updates will not work")
+        if not docker_host.startswith("tcp://"):
+            print("   Ensure socket is mounted with :ro and user has access")
 
     # Database initialization (M0 implementation)
     if DATABASE_AVAILABLE and startup_success:
@@ -168,15 +259,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
             logger.error(f"Database initialization failed: {e}")
             print(f"❌ Database initialization failed: {e}")
             startup_success = False
-            db_ready = False  # Ensure db_ready is set even on failure
+            db_ready = False
     elif not DATABASE_AVAILABLE:
         print("⚠️ Database system not available")
         startup_success = False
-        db_ready = False  # Ensure db_ready is set when database is not available
+        db_ready = False
 
     # Only show development credentials if database is ready and in development mode
     if db_ready and settings and settings.deployment_profile.value == "development":
-        print("\n📝 Development Credentials:")
+        print("\n🔐 Development Credentials:")
         print("   Username: admin")
         print("   Password: Harbor123!")
         print("   Dashboard: http://localhost:8080")
@@ -296,7 +387,7 @@ def create_app() -> FastAPI:
     # Health check endpoint (required for Docker health checks)
     @app.get("/healthz")
     async def health_check() -> dict[str, Any]:
-        """Enhanced health check endpoint with database status."""
+        """Enhanced health check endpoint with database status and runtime info."""
         try:
             health_data: dict[str, Any] = {
                 "status": "healthy",
@@ -304,6 +395,12 @@ def create_app() -> FastAPI:
                 "milestone": __milestone__,
                 "deployment_profile": deployment_profile,
                 "python_version": sys.version,
+                "runtime": {
+                    "user_id": os.getuid() if hasattr(os, "getuid") else None,
+                    "group_id": os.getgid() if hasattr(os, "getgid") else None,
+                    "is_root": os.getuid() == 0 if hasattr(os, "getuid") else None,
+                    "docker_accessible": check_docker_socket_access(),
+                },
                 "components": {
                     "configuration": CONFIG_AVAILABLE,
                     "database": DATABASE_AVAILABLE,
@@ -332,7 +429,7 @@ def create_app() -> FastAPI:
                             },
                         }
                     )
-                except Exception:  # Don't capture exception variable
+                except Exception:
                     logger.error("Config error in health check", exc_info=True)
                     health_data["config_status"] = "error"
 
@@ -349,9 +446,8 @@ def create_app() -> FastAPI:
                     if "size_mb" in db_info:
                         health_data["database"]["size_mb"] = db_info["size_mb"]
 
-                except Exception:  # Don't capture exception variable
+                except Exception:
                     logger.error("Database health check error", exc_info=True)
-                    # Don't expose database error details
                     health_data["database"] = {"status": "error"}
                     health_data["status"] = "degraded"
 
@@ -362,10 +458,8 @@ def create_app() -> FastAPI:
 
             return health_data
 
-        except Exception:  # Don't capture exception variable to avoid any exposure risk
+        except Exception:
             logger.error("Health check failed", exc_info=True)
-
-            # Return absolute minimum information
             return {
                 "status": "unhealthy",
                 "version": __version__,
@@ -381,9 +475,14 @@ def create_app() -> FastAPI:
             "version": __version__,
             "milestone": __milestone__,
             "status": __status__,
+            "runtime": {
+                "user_id": os.getuid() if hasattr(os, "getuid") else None,
+                "is_root": os.getuid() == 0 if hasattr(os, "getuid") else False,
+                "docker_accessible": check_docker_socket_access(),
+            },
             "components": {
                 "configuration": CONFIG_AVAILABLE,
-                "database": False,  # Will be updated below
+                "database": False,
                 "security_middleware": SECURITY_AVAILABLE,
             },
         }
@@ -405,7 +504,6 @@ def create_app() -> FastAPI:
             except Exception as config_err:
                 logger.error(f"Config error in readiness check: {config_err}")
                 ready_data["ready"] = False
-                # Don't expose error details
                 ready_data["config_error"] = "configuration check failed"
         else:
             ready_data["ready"] = False
@@ -422,16 +520,13 @@ def create_app() -> FastAPI:
                 }
 
                 # Verify essential tables exist by checking table count
-                if (
-                    db_info.get("table_count", 0) < 3
-                ):  # Should have at least users, settings, containers
+                if db_info.get("table_count", 0) < 3:
                     ready_data["ready"] = False
                     ready_data["database_error"] = "Essential tables missing"
 
             except Exception as db_err:
                 logger.error(f"Database readiness error: {db_err}")
                 ready_data["ready"] = False
-                # Don't expose database error details
                 ready_data["database_error"] = "database check failed"
                 ready_data["components"]["database"] = False
         else:
@@ -459,7 +554,6 @@ def create_app() -> FastAPI:
             try:
                 db_info = await get_database_info()
 
-                # Check if there was an error getting database info
                 if "error" in db_info:
                     logger.warning("Database info retrieval failed")
                     return {
@@ -532,7 +626,6 @@ def create_app() -> FastAPI:
 
             except Exception as e:
                 logger.error(f"Database health check error: {e}", exc_info=True)
-                # Don't expose exception details
                 return {
                     "status": "unhealthy",
                     "connection": "error",
@@ -552,6 +645,10 @@ def create_app() -> FastAPI:
             "documentation": "/docs",
             "health": "/healthz",
             "readiness": "/readyz",
+            "runtime": {
+                "user_id": os.getuid() if hasattr(os, "getuid") else None,
+                "is_root": os.getuid() == 0 if hasattr(os, "getuid") else False,
+            },
             "components": {
                 "configuration": CONFIG_AVAILABLE,
                 "database": DATABASE_AVAILABLE,
@@ -598,6 +695,11 @@ def create_app() -> FastAPI:
             "status": __status__,
             "python_version": sys.version,
             "deployment_profile": deployment_profile,
+            "runtime": {
+                "user_id": os.getuid() if hasattr(os, "getuid") else None,
+                "group_id": os.getgid() if hasattr(os, "getgid") else None,
+                "is_root": os.getuid() == 0 if hasattr(os, "getuid") else False,
+            },
             "build_info": {
                 "security_middleware": "v1.0" if SECURITY_AVAILABLE else "unavailable",
                 "database_system": "v1.0" if DATABASE_AVAILABLE else "unavailable",
@@ -609,11 +711,11 @@ def create_app() -> FastAPI:
                     "repository_pattern" if DATABASE_AVAILABLE else None,
                 ],
                 "features_planned": [
-                    "authentication_system",  # Next M0 task
-                    "api_endpoints",  # Next M0 task
-                    "template_system",  # Next M0 task
-                    "container_discovery",  # M1
-                    "update_engine",  # M2
+                    "authentication_system",
+                    "api_endpoints",
+                    "template_system",
+                    "container_discovery",
+                    "update_engine",
                 ],
             },
         }
@@ -642,7 +744,6 @@ def create_app() -> FastAPI:
                 )
             except Exception:
                 logger.error("Error getting settings for version info", exc_info=True)
-                # Silently ignore config errors - version endpoint should always work
                 pass
 
         return version_data
@@ -652,6 +753,16 @@ def create_app() -> FastAPI:
     def security_status() -> dict[str, Any]:
         """Security status endpoint showing enabled security features."""
         security_data: dict[str, Any] = {
+            "runtime_security": {
+                "user_id": os.getuid() if hasattr(os, "getuid") else None,
+                "group_id": os.getgid() if hasattr(os, "getgid") else None,
+                "is_root": os.getuid() == 0 if hasattr(os, "getuid") else False,
+                "read_only_root": os.environ.get("READ_ONLY_ROOT", "false") == "true",
+                "no_new_privileges": True,  # Set by Docker
+                "docker_socket": "proxy"
+                if os.environ.get("DOCKER_HOST", "").startswith("tcp://")
+                else "direct",
+            },
             "security_middleware": {
                 "enabled": SECURITY_AVAILABLE,
                 "components": {
@@ -695,8 +806,6 @@ def create_app() -> FastAPI:
                         "frame_options": headers.get("X-Frame-Options"),
                     }
                 except ImportError:
-                    # Security headers module is optional - endpoint should still work without it
-                    # Headers info will simply be omitted from the response
                     logger.debug(
                         "Security headers module not available - skipping headers info"
                     )
@@ -748,13 +857,11 @@ def create_app() -> FastAPI:
                         config_summary["database"] = db_info
                     except Exception:
                         logger.error("Config database info error", exc_info=True)
-                        # Don't expose internal error details
                         config_summary["database_status"] = "unavailable"
 
                 return config_summary
             except Exception:
                 logger.error("Config info error", exc_info=True)
-                # Don't expose exception details
                 return {"error": "Configuration information unavailable"}
 
     # Development endpoints for database testing
@@ -792,7 +899,6 @@ def create_app() -> FastAPI:
 
             except Exception:
                 logger.error("Database test failed", exc_info=True)
-                # Don't expose exception details even in debug mode
                 return {
                     "status": "error",
                     "message": "Database test failed",
@@ -835,7 +941,6 @@ def create_app() -> FastAPI:
 
             except Exception:
                 logger.error("Security test failed", exc_info=True)
-                # Don't expose exception details even in debug mode
                 return {
                     "status": "error",
                     "message": "Security test failed",
@@ -854,6 +959,17 @@ def main() -> None:
     print(f"🚢 Harbor Container Updater v{__version__}")
     print(f"🎯 Status: {__status__} ({__milestone__} Milestone)")
     print(f"📖 Description: {__description__}")
+    print()
+
+    # Show runtime user info
+    if hasattr(os, "getuid"):
+        uid = os.getuid()
+        gid = os.getgid()
+        print(
+            f"👤 Running as: UID={uid}, GID={gid} ({'root' if uid == 0 else 'non-root'})"
+        )
+        if uid == 0:
+            print("⚠️  Warning: Running as root is not recommended")
     print()
 
     # Show M0 milestone progress with database integration

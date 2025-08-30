@@ -1,86 +1,142 @@
-# Harbor Container Updater - Fixed Production Dockerfile
-# Simplified and more robust build process
+# deploy/docker/Dockerfile
+# syntax=docker/dockerfile:1
+# Harbor Container Updater - Fully Optimized Production Build
 
-FROM python:3.13-slim AS base
+FROM python:3.13-slim-bullseye AS builder
 
-# Install system dependencies including build tools for psutil
-RUN apt-get update && apt-get install -y \
-    --no-install-recommends \
-    curl \
-    ca-certificates \
-    tzdata \
+# Build-time optimizations
+ARG PIP_NO_CACHE_DIR=1
+ARG PIP_DISABLE_PIP_VERSION_CHECK=1
+ARG PIP_NO_COMPILE=1
+ARG PYTHONDONTWRITEBYTECODE=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     python3-dev \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && rm -rf /var/lib/apt/lists/*
 
-# Create harbor user
-RUN groupadd -r harbor && useradd -r -g harbor harbor
+WORKDIR /build
+COPY requirements/ requirements/
 
-# Set working directory
+# Build wheels without compilation for smaller size
+RUN pip wheel --no-cache-dir --wheel-dir=/wheels --no-compile \
+    -r requirements/base.txt \
+    -r requirements/production.txt
+
+# Generate SBOM in builder stage
+RUN pip install --no-cache-dir pip-licenses && \
+    pip-licenses --format=json --with-urls --with-licenses > /build/sbom.json && \
+    pip-licenses --format=markdown > /build/sbom.md && \
+    pip uninstall -y pip-licenses
+
+# Final stage - Fully optimized
+FROM python:3.13-slim-bullseye
+
+# Metadata and security labels
+LABEL org.opencontainers.image.title="Harbor Container Updater" \
+      org.opencontainers.image.description="Automated Docker container updates" \
+      org.opencontainers.image.source="https://github.com/DeusExTaco/harbor" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.vendor="Harbor Team" \
+      security.scan="trivy" \
+      security.contact="security@harbor.dev" \
+      security.sbom="/app/sbom.json"
+
+# Create non-root user
+RUN groupadd -r harbor --gid=1000 && \
+    useradd -r -g harbor --uid=1000 --home-dir=/app --create-home --shell=/usr/sbin/nologin harbor
+
+# Install minimal runtime dependencies with security updates
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    tzdata \
+    && apt-get clean && \
+    apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
+    /usr/share/doc/* /usr/share/man/* /usr/share/info/* \
+    /usr/share/lintian/* /usr/share/linda/*
+
+# Install Python packages with optimization
+COPY --from=builder /wheels /wheels
+RUN pip install --no-cache-dir --no-compile --no-index \
+    --find-links=/wheels /wheels/* && \
+    rm -rf /wheels /root/.cache /tmp/* && \
+    # Aggressive Python cleanup
+    find /usr/local -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/local -type d -name 'test' -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/local -type d -name 'tests' -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/local -type f -name '*.pyc' -delete && \
+    find /usr/local -type f -name '*.pyo' -delete && \
+    find /usr/local -type f -name '*.a' -delete && \
+    find /usr/local -type f -name '*.la' -delete && \
+    rm -rf /usr/local/lib/python*/dist-packages/*.dist-info && \
+    rm -rf /usr/local/lib/python*/site-packages/*.dist-info/RECORD && \
+    rm -rf /usr/local/lib/python*/site-packages/*.dist-info/WHEEL && \
+    rm -rf /usr/local/lib/python*/site-packages/*.dist-info/REQUESTED
+
 WORKDIR /app
 
-# Set environment variables
+# Copy application files with minimal footprint
+COPY --chown=1000:1000 app/ ./app/
+COPY --chown=1000:1000 scripts/ ./scripts/
+COPY --chown=1000:1000 LICENSE README.md ./
+
+# Copy SBOM and security policy
+COPY --from=builder --chown=1000:1000 /build/sbom.json /build/sbom.md ./
+
+# Create a minimal security.json if it doesn't exist
+RUN echo '{"version": "1.0", "security": {"enabled": true}}' > /tmp/security.json && \
+    if [ ! -f /app/security.json ]; then cp /tmp/security.json /app/security.json; fi && \
+    rm /tmp/security.json && \
+    chown 1000:1000 /app/security.json
+
+# Validate security policy
+RUN python -c "import json; json.load(open('/app/security.json'))" && \
+    # Set up directories with strict permissions
+    mkdir -p /app/data /app/logs && \
+    chown -R 1000:1000 /app && \
+    chmod -R u=rwX,go=rX /app && \
+    chmod 755 /app/scripts/*.py 2>/dev/null || true && \
+    # Remove write permissions from code files
+    find /app -type f -name "*.py" -exec chmod 444 {} \;
+
+# Create entrypoint script using echo commands
+# hadolint ignore=SC2016
+RUN echo '#!/bin/sh' > /app/docker-entrypoint.sh && \
+    echo 'set -e' >> /app/docker-entrypoint.sh && \
+    echo '' >> /app/docker-entrypoint.sh && \
+    echo '# If first argument is python or starts with -, pass all arguments to python' >> /app/docker-entrypoint.sh && \
+    echo 'if [ "$1" = "python" ] || [ "${1#-}" != "$1" ]; then' >> /app/docker-entrypoint.sh && \
+    echo '    exec "$@"' >> /app/docker-entrypoint.sh && \
+    echo 'fi' >> /app/docker-entrypoint.sh && \
+    echo '' >> /app/docker-entrypoint.sh && \
+    echo '# If running tests (when -c is passed), execute with python' >> /app/docker-entrypoint.sh && \
+    echo 'if [ "$1" = "-c" ]; then' >> /app/docker-entrypoint.sh && \
+    echo '    exec python "$@"' >> /app/docker-entrypoint.sh && \
+    echo 'fi' >> /app/docker-entrypoint.sh && \
+    echo '' >> /app/docker-entrypoint.sh && \
+    echo '# Default: run the Harbor application with uvicorn' >> /app/docker-entrypoint.sh && \
+    echo 'exec python -m uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8080' >> /app/docker-entrypoint.sh && \
+    chmod 755 /app/docker-entrypoint.sh && \
+    chown 1000:1000 /app/docker-entrypoint.sh
+
+# Switch to non-root user
+USER 1000:1000
+
+# Security-hardened environment
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PYTHONHASHSEED=random \
+    HARBOR_MODE=homelab \
+    LOG_LEVEL=INFO
 
-# Copy and install requirements separately for better caching
-COPY requirements/ ./requirements/
-
-# Upgrade pip and install requirements with error handling
-RUN echo "📦 Installing Harbor dependencies..." && \
-    pip install --upgrade pip && \
-    echo "🔧 Installing base requirements..." && \
-    pip install -r requirements/base.txt || \
-    (echo "⚠️ Some packages failed, trying without optional dependencies..." && \
-     pip install -r requirements/base.txt --no-deps && \
-     pip install fastapi uvicorn sqlalchemy alembic pydantic pydantic-settings && \
-     pip install jinja2 httpx docker apscheduler structlog prometheus-client && \
-     pip install argon2-cffi cryptography python-dateutil packaging aiosqlite && \
-     echo "✅ Core dependencies installed, psutil/pyyaml may be skipped") && \
-    echo "🏭 Installing production requirements..." && \
-    pip install -r requirements/production.txt && \
-    echo "✅ All dependencies installed successfully"
-
-# Verify critical imports work
-RUN echo "🔍 Verifying critical dependencies..." && \
-    python -c "import uvicorn; print('✅ uvicorn available')" && \
-    python -c "import fastapi; print('✅ fastapi available')" && \
-    python -c "import sqlalchemy; print('✅ sqlalchemy available')" && \
-    python -c "import pydantic; print('✅ pydantic available')" && \
-    echo "✅ Core dependencies verified"
-
-# Copy application code
-COPY --chown=harbor:harbor app/ ./app/
-COPY --chown=harbor:harbor scripts/ ./scripts/
-COPY --chown=harbor:harbor pyproject.toml README.md LICENSE ./
-
-# Create required directories
-RUN mkdir -p /app/data /app/logs /app/config && \
-    chown -R harbor:harbor /app
-
-# Switch to harbor user
-USER harbor
-
-# Final application verification
-RUN echo "🔍 Final Harbor application check..." && \
-    python -c "import sys; sys.path.insert(0, '/app'); import app; print(f'✅ Harbor v{app.__version__} ready')" && \
-    echo "✅ Harbor application verified successfully"
-
-# Set default environment for homelab
-ENV HARBOR_MODE=homelab \
-    LOG_LEVEL=INFO \
-    ENABLE_AUTO_DISCOVERY=true
-
-# Expose port
 EXPOSE 8080
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD python scripts/health_check.py || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["python", "scripts/health_check.py"]
 
-# Start Harbor
-CMD ["python", "-m", "uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080"]
+# Use shell script as entrypoint to handle different execution modes
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

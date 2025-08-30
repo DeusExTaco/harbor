@@ -1,15 +1,34 @@
 ---
-# deploy/docker/docker-compose.yml
+# docker-compose.yml
 # Harbor Container Updater - Production Deployment (Home Lab Optimized)
+version: '3.8'
 
 services:
   harbor:
     build:
-      context: ../..  # Build from project root
+      context: .  # Build from project root
       dockerfile: deploy/docker/Dockerfile
     image: harbor/harbor:latest
     container_name: harbor
     restart: unless-stopped
+
+    # Security options (matching the enhanced Dockerfile)
+    security_opt:
+    - no-new-privileges:true
+    cap_drop:
+    - ALL
+    cap_add:
+    - CHOWN        # Needed for file ownership operations
+    - SETUID       # Needed for user switching
+    - SETGID       # Needed for group switching
+    read_only: true  # Read-only root filesystem
+    tmpfs:
+    - /tmp:size=100M,mode=1777
+    - /run:size=10M,mode=755
+    - /app/.cache:size=50M,mode=755
+
+    # Run as non-root user (matching Dockerfile)
+    user: 1000:1000
 
     ports:
     - 8080:8080
@@ -17,16 +36,19 @@ services:
     volumes:
       # Docker socket for container management (read-only)
     - /var/run/docker.sock:/var/run/docker.sock:ro
-      # Persistent data storage
-    - harbor_data:/app/data
-      # Logs persistence
-    - harbor_logs:/app/logs
-      # Optional: Custom configuration
-      # - ../../config:/app/config:ro
+      # Persistent data storage (writable by UID 1000)
+    - harbor_data:/app/data:rw
+      # Logs persistence (writable by UID 1000)
+    - harbor_logs:/app/logs:rw
+      # Optional: Custom configuration (read-only)
+      # - ./config:/app/config:ro
 
     environment:
       # Deployment profile
     - HARBOR_MODE=homelab
+
+      # Security environment
+    - PYTHONHASHSEED=random
 
       # Logging
     - LOG_LEVEL=INFO
@@ -82,11 +104,13 @@ volumes:
     driver: local
     labels:
     - com.harbor.description=Harbor persistent data
+    - com.harbor.owner=1000      # Document expected ownership
 
   harbor_logs:
     driver: local
     labels:
     - com.harbor.description=Harbor application logs
+    - com.harbor.owner=1000      # Document expected ownership
 
 networks:
   default:

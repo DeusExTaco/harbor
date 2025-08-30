@@ -1,0 +1,31 @@
+{
+  "version": "1.0.0",
+  "security": {
+    "scanning": {
+      "enabled": true,
+      "tools": ["trivy", "snyk"],
+      "frequency": "on-build"
+    },
+    "runtime": {
+      "user": "non-root",
+      "uid": 1000,
+      "gid": 1000,
+      "capabilities_dropped": ["ALL"],
+      "read_only_root": true,
+      "no_new_privileges": true
+    },
+    "network": {
+      "expose_ports": [8080],
+      "internal_only": false
+    },
+    "secrets": {
+      "mount_path": "/run/secrets",
+      "environment_prefix": "HARBOR_"
+    },
+    "compliance": {
+      "sbom_included": true,
+      "license": "MIT",
+      "cve_monitoring": true
+    }
+  }
+}
