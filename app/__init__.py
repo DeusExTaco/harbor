@@ -11,7 +11,7 @@ Licensed under the MIT License
 from typing import TYPE_CHECKING, Any
 
 
-__version__ = "0.1.0-alpha.3"
+__version__ = "0.1.0-alpha.5"
 __description__ = "Automated Docker container updates for home labs and enterprises"
 __author__ = "Harbor Contributors"
 __license__ = "MIT"

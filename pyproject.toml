@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "harbor"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.5"
 description = "Automated Docker container updates for home labs and enterprises"
 readme = "README.md"
 authors = [{name = "Harbor Contributors", email = "harbor@example.com"}]
