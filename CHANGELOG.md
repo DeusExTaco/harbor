@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 -
 
+## [0.1.0-alpha.5] - 2025-08-30
+
+### Added
+- Removed additioal non ascii characters from health_check.py (#40)
+
+### Fixed
+- Resolve Docker build and shell parsing errors
+
 ## [0.1.0-alpha.4] - 2025-08-30
 
 ### Added
