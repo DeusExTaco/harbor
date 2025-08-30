@@ -555,17 +555,20 @@ jobs:
   # =============================================================================
   # Update PR Security Summary
   # =============================================================================
+  # In security.yml, update the pr-security-comment job:
   pr-security-comment:
     name: Update PR Security Summary
-    needs: [security-summary]
+    needs: [ security-summary ]
     if: |
       github.event_name == 'pull_request' &&
       github.event.pull_request.number != null &&
+      github.event.pull_request.number != 0 &&
       always()
     uses: ./.github/workflows/pr-comment.yml
     with:
       comment-id: 'security-summary'
       title: '🛡️ Harbor Security Scan Results'
+      pr-number: ${{ github.event.pull_request.number }}  # ADD THIS LINE
       body: |
         ### Security Scan Status
 
