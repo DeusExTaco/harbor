@@ -9,6 +9,10 @@ ARG PIP_NO_CACHE_DIR=1
 ARG PIP_DISABLE_PIP_VERSION_CHECK=1
 ARG PYTHONDONTWRITEBYTECODE=1
 
+# Create non-root user for builder stage too
+RUN groupadd -r builder --gid=1001 && \
+    useradd -r -g builder --uid=1001 --home-dir=/build --create-home builder
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     python3-dev \
@@ -17,15 +21,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /build
 COPY requirements/ requirements/
 
-# Build wheels (remove --no-compile as it's not valid for pip wheel)
-RUN pip wheel --no-cache-dir --wheel-dir=/wheels \
+# Change ownership to builder user
+RUN chown -R builder:builder /build
+
+# Switch to non-root user for pip operations
+USER builder
+
+# Build wheels as non-root user
+RUN pip wheel --no-cache-dir --wheel-dir=/build/wheels \
     -r requirements/base.txt \
     -r requirements/production.txt
 
-# Generate SBOM in builder stage
-RUN pip install --no-cache-dir pip-licenses && \
-    pip-licenses --format=json --with-urls --with-licenses > /build/sbom.json && \
-    pip-licenses --format=markdown > /build/sbom.md && \
+# Generate SBOM as non-root user
+RUN pip install --user --no-cache-dir pip-licenses && \
+    python -m pip_licenses --format=json --with-urls -l > /build/sbom.json && \
+    python -m pip_licenses --format=markdown > /build/sbom.md && \
     pip uninstall -y pip-licenses
 
 # Final stage - Fully optimized
@@ -45,7 +55,7 @@ LABEL org.opencontainers.image.title="Harbor Container Updater" \
 RUN groupadd -r harbor --gid=1000 && \
     useradd -r -g harbor --uid=1000 --home-dir=/app --create-home --shell=/usr/sbin/nologin harbor
 
-# Install minimal runtime dependencies with security updates
+# Install minimal runtime dependencies with security updates (must be done as root)
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
@@ -57,8 +67,8 @@ RUN apt-get update && \
     /usr/share/doc/* /usr/share/man/* /usr/share/info/* \
     /usr/share/lintian/* /usr/share/linda/*
 
-# Install Python packages with --no-compile flag here where it's valid
-COPY --from=builder /wheels /wheels
+# Install Python packages (still as root for system-wide installation)
+COPY --from=builder --chown=root:root /build/wheels /wheels
 RUN pip install --no-cache-dir --no-compile --no-index \
     --find-links=/wheels /wheels/* && \
     rm -rf /wheels /root/.cache /tmp/* && \
@@ -82,7 +92,7 @@ COPY --chown=1000:1000 app/ ./app/
 COPY --chown=1000:1000 scripts/ ./scripts/
 COPY --chown=1000:1000 LICENSE README.md ./
 
-# Copy SBOM and security policy
+# Copy SBOM and security policy from builder
 COPY --from=builder --chown=1000:1000 /build/sbom.json /build/sbom.md ./
 
 # Create a minimal security.json if it doesn't exist
