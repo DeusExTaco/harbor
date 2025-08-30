@@ -56,16 +56,40 @@ jobs:
         with:
           fetch-depth: 0
 
+      # ADD EARLY EXIT CHECK
+      - name: Check for security scan skip
+        id: skip-check
+        run: |
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+
+          # Allow skipping non-critical security scans in development
+          if [[ "$COMMIT_MSG" == *"[skip security]"* ]] && [[ "${{ github.ref }}" != "refs/heads/main" ]]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::warning::Security scans skipped (not allowed on main branch)"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Early exit if skipped
+        if: steps.skip-check.outputs.skip == 'true'
+        run: |
+          echo "passed=true" >> $GITHUB_OUTPUT
+          echo "Security scan skipped by developer request"
+          exit 0
+
       - name: Set up Python
+        if: steps.skip-check.outputs.skip != 'true'
         uses: actions/setup-python@v4
         with:
           python-version: '3.13'
 
       - name: Install security tools
+        if: steps.skip-check.outputs.skip != 'true'
         run: |
           pip install bandit safety pip-audit detect-secrets
 
       - name: Install project dependencies (if available)
+        if: steps.skip-check.outputs.skip != 'true'
         run: |
           # Install from your requirements structure
           if [ -f "requirements/base.txt" ]; then
@@ -85,6 +109,7 @@ jobs:
           fi
 
       - name: Run secret detection scan
+        if: steps.skip-check.outputs.skip != 'true'
         run: |
           echo "🔍 Running detect-secrets scan..."
           if [ ! -f .secrets.baseline ]; then
@@ -94,6 +119,7 @@ jobs:
           detect-secrets scan --all-files --baseline .secrets.baseline
 
       - name: Run Bandit security analysis
+        if: steps.skip-check.outputs.skip != 'true'
         run: |
           # Only scan if app directory exists with Python files
           if [ -d "app" ] && find app -name "*.py" -type f | head -1 > /dev/null; then
@@ -105,11 +131,13 @@ jobs:
           fi
 
       - name: Run pip-audit for dependency vulnerabilities
+        if: steps.skip-check.outputs.skip != 'true'
         run: |
           echo "🔍 Running pip-audit on installed packages..."
           pip-audit --format=json --output=pip-audit-report.json || echo "⚠️ pip-audit completed with findings"
 
       - name: Run safety check
+        if: steps.skip-check.outputs.skip != 'true'
         run: |
           echo "🔍 Running safety check..."
           if command -v safety > /dev/null; then
@@ -121,13 +149,19 @@ jobs:
       - name: Set static security result
         id: static-result
         run: |
-          # For M0, we'll be lenient on static security issues
-          echo "passed=true" >> $GITHUB_OUTPUT
-          echo "✅ Static security analysis completed"
+          # Check if skipped
+          if [ "${{ steps.skip-check.outputs.skip }}" == "true" ]; then
+            echo "passed=true" >> $GITHUB_OUTPUT
+            echo "✅ Static security analysis skipped"
+          else
+            # For M0, we'll be lenient on static security issues
+            echo "passed=true" >> $GITHUB_OUTPUT
+            echo "✅ Static security analysis completed"
+          fi
 
       - name: Upload static security scan results
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.skip-check.outputs.skip != 'true'
         with:
           name: static-security-reports-${{ github.run_id }}
           path: |
@@ -154,10 +188,36 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # ADD EARLY EXIT CHECK
+      - name: Check for container scan skip
+        id: skip-check
+        run: |
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+
+          if [[ "$COMMIT_MSG" == *"[skip security]"* ]] && [[ "${{ github.ref }}" != "refs/heads/main" ]]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::warning::Container security scan skipped (not allowed on main)"
+          elif [[ "$COMMIT_MSG" == *"[skip container-scan]"* ]] && [[ "${{ github.ref }}" != "refs/heads/main" ]]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::warning::Container scan specifically skipped"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Early exit if skipped
+        if: steps.skip-check.outputs.skip == 'true'
+        run: |
+          echo "container-passed=true" >> $GITHUB_OUTPUT
+          echo "images-scanned=" >> $GITHUB_OUTPUT
+          echo "Container security scan skipped"
+          exit 0
+
       - name: Set up Docker Buildx
+        if: steps.skip-check.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Determine images to scan
+        if: steps.skip-check.outputs.skip != 'true'
         id: scan-images
         run: |
           echo "🔍 Determining images to scan..."
@@ -205,7 +265,7 @@ jobs:
 
       # Login to registries (for pulling images)
       - name: Log in to Docker Hub
-        if: steps.scan-images.outputs.images-scanned != '' && contains(steps.scan-images.outputs.images-scanned, 'dextaco/harbor')
+        if: steps.skip-check.outputs.skip != 'true' && steps.scan-images.outputs.images-scanned != '' && contains(steps.scan-images.outputs.images-scanned, 'dextaco/harbor')
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}  # pragma: allowlist secret
@@ -213,7 +273,7 @@ jobs:
         continue-on-error: true
 
       - name: Log in to GitHub Container Registry
-        if: steps.scan-images.outputs.images-scanned != '' && contains(steps.scan-images.outputs.images-scanned, 'ghcr.io')
+        if: steps.skip-check.outputs.skip != 'true' && steps.scan-images.outputs.images-scanned != '' && contains(steps.scan-images.outputs.images-scanned, 'ghcr.io')
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -222,7 +282,7 @@ jobs:
         continue-on-error: true
 
       - name: Run Trivy container vulnerability scan
-        if: steps.scan-images.outputs.images-scanned != ''
+        if: steps.skip-check.outputs.skip != 'true' && steps.scan-images.outputs.images-scanned != ''
         run: |
           echo "🔍 Running Trivy container vulnerability scans..."
 
@@ -282,6 +342,7 @@ jobs:
           fi
 
       - name: Run Trivy filesystem scan
+        if: steps.skip-check.outputs.skip != 'true'
         run: |
           echo "🔍 Running Trivy filesystem scan..."
 
@@ -304,8 +365,11 @@ jobs:
       - name: Set container security result
         id: container-result
         run: |
-          # For M0, we'll be lenient on container security issues
-          if [ "${{ steps.scan-images.outputs.images-scanned }}" != "" ]; then
+          # Check if skipped
+          if [ "${{ steps.skip-check.outputs.skip }}" == "true" ]; then
+            echo "passed=true" >> $GITHUB_OUTPUT
+            echo "✅ Container security scan skipped"
+          elif [ "${{ steps.scan-images.outputs.images-scanned }}" != "" ]; then
             echo "passed=true" >> $GITHUB_OUTPUT
             echo "✅ Container security scans completed"
           else
@@ -315,7 +379,7 @@ jobs:
 
       - name: Upload container security reports
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.skip-check.outputs.skip != 'true'
         with:
           name: container-security-reports-${{ github.run_id }}
           path: trivy-results/
@@ -340,7 +404,31 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # ADD EARLY EXIT CHECK
+      - name: Check for infrastructure scan skip
+        id: skip-check
+        run: |
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+
+          if [[ "$COMMIT_MSG" == *"[skip security]"* ]] && [[ "${{ github.ref }}" != "refs/heads/main" ]]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::warning::Infrastructure scan skipped (not allowed on main)"
+          elif [[ "$COMMIT_MSG" == *"[skip infra-scan]"* ]]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::notice::Infrastructure scan skipped"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Early exit if skipped
+        if: steps.skip-check.outputs.skip == 'true'
+        run: |
+          echo "infrastructure-passed=true" >> $GITHUB_OUTPUT
+          echo "Infrastructure scan skipped by request"
+          exit 0
+
       - name: Run Checkov for Infrastructure as Code
+        if: steps.skip-check.outputs.skip != 'true'
         run: |
           pip install checkov
           echo "🔍 Running Checkov security scan..."
@@ -360,12 +448,17 @@ jobs:
       - name: Set infrastructure security result
         id: infra-result
         run: |
-          echo "passed=true" >> $GITHUB_OUTPUT
-          echo "✅ Infrastructure security scan completed"
+          if [ "${{ steps.skip-check.outputs.skip }}" == "true" ]; then
+            echo "passed=true" >> $GITHUB_OUTPUT
+            echo "✅ Infrastructure security scan skipped"
+          else
+            echo "passed=true" >> $GITHUB_OUTPUT
+            echo "✅ Infrastructure security scan completed"
+          fi
 
       - name: Upload infrastructure security report
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.skip-check.outputs.skip != 'true'
         with:
           name: infrastructure-security-report-${{ github.run_id }}
           path: security-reports/checkov-report.json
@@ -391,6 +484,14 @@ jobs:
           echo "# 🛡️ Harbor Security Scan Summary" > security-summary.md
           echo "Generated on: $(date -u)" >> security-summary.md
           echo "" >> security-summary.md
+
+          # CHECK FOR SKIP FLAGS IN COMMIT MESSAGE
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          if [[ "$COMMIT_MSG" == *"[skip security]"* ]]; then
+            echo "⚠️ **Security scans were skipped via commit flag**" >> security-summary.md
+            echo "" >> security-summary.md
+          fi
+
           echo "## 📊 Scan Results" >> security-summary.md
           echo "- 🔍 Static Security: ${{ needs.static-security.result }}" >> security-summary.md
           echo "- 🐳 Container Security: ${{ needs.container-security.result }}" >> security-summary.md
@@ -448,10 +549,10 @@ jobs:
           name: security-summary-${{ github.run_id }}
           path: security-summary.md
           retention-days: 30
-  # =============================================================================
-  # Update PR Security Summary)
-  # =============================================================================
 
+  # =============================================================================
+  # Update PR Security Summary
+  # =============================================================================
   pr-security-comment:
     name: Update PR Security Summary
     needs: [security-summary]

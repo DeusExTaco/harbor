@@ -1,0 +1,40 @@
+# .dockerignore
+# Git files
+.git
+.github
+.gitignore
+
+# Documentation
+docs/
+*.md
+LICENSE
+
+# Development files
+.env*
+.vscode/
+.idea/
+*.pyc
+__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# CI/CD
+.github/
+deploy/terraform/
+deploy/ansible/
+deploy/kubernetes/
+
+# Testing
+tests/fixtures/
+tests/e2e/
+coverage.xml
+
+# Examples
+examples/
+
+# Logs and databases
+*.log
+*.db
+data/
+logs/

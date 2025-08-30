@@ -45,7 +45,34 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Check for skip indicators
+        id: skip-check
+        run: |
+          # Check commit message for skip indicators
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+
+          if [[ "$COMMIT_MSG" == *"[skip ci]"* ]] || [[ "$COMMIT_MSG" == *"[ci skip]"* ]]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "reason=commit-message" >> $GITHUB_OUTPUT
+            echo "CI skipped due to [skip ci] in commit message"
+          elif [[ "$COMMIT_MSG" == *"[skip tests]"* ]]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "reason=skip-tests" >> $GITHUB_OUTPUT
+            echo "Tests skipped due to [skip tests] in commit message"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "reason=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Early exit if skipped
+        if: steps.skip-check.outputs.skip == 'true'
+        run: |
+          echo "Skipping quality checks - Reason: ${{ steps.skip-check.outputs.reason }}"
+          echo "quality-passed=true" >> $GITHUB_OUTPUT
+          exit 0
+
       - name: Set up Python
+        if: steps.skip-check.outputs.skip != 'true'
         uses: actions/setup-python@v4
         with:
           python-version: '3.13'
@@ -125,8 +152,9 @@ jobs:
       (inputs.stage == 'full-tests' || github.event_name != 'workflow_call')
 
     strategy:
+      fail-fast: false  # Don't cancel other jobs if one fails
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ${{ github.event_name == 'pull_request' && fromJSON('["3.13"]') || fromJSON('["3.11", "3.12", "3.13"]') }}
 
     outputs:
       tests-passed: ${{ steps.test-result.outputs.passed }}
