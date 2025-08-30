@@ -555,34 +555,58 @@ jobs:
   # =============================================================================
   # Update PR Security Summary
   # =============================================================================
-  # In security.yml, update the pr-security-comment job:
+
   pr-security-comment:
     name: Update PR Security Summary
-    needs: [ security-summary ]
+    needs: [static-security, container-security, infrastructure-security, security-summary]
     if: |
       github.event_name == 'pull_request' &&
       github.event.pull_request.number != null &&
       github.event.pull_request.number != 0 &&
       always()
-    uses: ./.github/workflows/pr-comment.yml
-    with:
-      comment-id: 'security-summary'
-      title: '🛡️ Harbor Security Scan Results'
-      pr-number: ${{ github.event.pull_request.number }}  # ADD THIS LINE
-      body: |
-        ### Security Scan Status
+    runs-on: ubuntu-latest
 
-        | Scan Type | Result |
-        |-----------|--------|
-        | 🔍 Static Analysis | ${{ needs.static-security.result }} |
-        | 🐳 Container Security | ${{ needs.container-security.result }} |
-        | 🏗️ Infrastructure | ${{ needs.infrastructure-security.result }} |
+    permissions:
+      pull-requests: write
+      issues: write
 
-        **Overall Security**: ${{ needs.security-summary.outputs.security-passed == 'true' && '✅ PASSED' || '⚠️ NEEDS REVIEW' }}
+    steps:
+      - name: Generate security summary
+        run: |
+          cat > security-summary.md << EOF
+          <!-- harbor-pr-comment:security-summary -->
+          ## 🛡️ Harbor Security Scan Results
 
-        ### Vulnerability Summary
-        - Critical: 0
-        - High: 0
-        - Medium: Acceptable for M0
+          ### Security Scan Status
 
-        Reports available as workflow artifacts.
+          | Scan Type | Result |
+          |-----------|--------|
+          | 🔍 Static Analysis | ${{ needs.static-security.result }} |
+          | 🐳 Container Security | ${{ needs.container-security.result }} |
+          | 🏗️ Infrastructure | ${{ needs.infrastructure-security.result }} |
+
+          **Overall Security**: ${{ needs.security-summary.outputs.security-passed == 'true' && '✅ PASSED' || '⚠️ NEEDS REVIEW' }}
+
+          ### Vulnerability Summary
+          - Critical: 0
+          - High: 0
+          - Medium: Acceptable for M0
+
+          Reports available as workflow artifacts.
+          EOF
+
+      - name: Find existing comment
+        uses: peter-evans/find-comment@v2
+        id: find-comment
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '<!-- harbor-pr-comment:security-summary -->'
+
+      - name: Create or update comment
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: security-summary.md
+          edit-mode: replace
