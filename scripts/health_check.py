@@ -91,7 +91,7 @@ def main() -> int:
         result = check_health()
 
         if result["status"] == "healthy":
-            print("✅ Harbor is healthy")
+            print("Harbor is healthy")
             if "response" in result and isinstance(result["response"], dict):
                 response_data = result["response"]
                 print(f"   Status: {response_data.get('status', 'OK')}")
@@ -102,14 +102,14 @@ def main() -> int:
                 )
             return 0
         else:
-            print("❌ Harbor is unhealthy")
+            print("Harbor is unhealthy")
             print(f"   Error: {result.get('error', 'Unknown error')}")
             if "url" in result:
                 print(f"   URL: {result['url']}")
             return 1
 
     except Exception as e:
-        print(f"❌ Health check script failed: {e}")
+        print(f"Health check script failed: {e}")
         return 1
 
 

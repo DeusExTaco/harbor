@@ -114,20 +114,36 @@ jobs:
           # Get commits since last tag or last version bump commit
           if [ -n "$LAST_TAG" ]; then
             echo "Getting commits since tag: $LAST_TAG"
-            COMMITS=$(git log --pretty=format:"%s" $LAST_TAG..HEAD --no-merges | grep -v "^\[skip ci\]" | head -20)
+            COMMITS=$(git log --pretty=format:"%s" $LAST_TAG..HEAD --no-merges | grep -v "^\[skip ci\]" | head -20 || true)
           else
             # Get last 10 commits excluding version bumps
             echo "No tags found, getting recent commits"
-            COMMITS=$(git log --pretty=format:"%s" -15 --no-merges | grep -v "^\[skip ci\]" | grep -v "^Bump version" | head -10)
+            COMMITS=$(git log --pretty=format:"%s" -15 --no-merges | grep -v "^\[skip ci\]" | grep -v "^Bump version" | head -10 || true)
           fi
 
-          # Save commits for changelog update
-          echo "$COMMITS" > recent_commits.txt
+          # Save commits for changelog update (handle empty case)
+          if [ -z "$COMMITS" ]; then
+            echo "No commits found for changelog"
+            echo "" > recent_commits.txt
+          else
+            echo "$COMMITS" > recent_commits.txt
+          fi
 
-          # Count commits by type for summary
-          FEATURE_COUNT=$(echo "$COMMITS" | grep -ciE "(add|feat|feature)" || echo 0)
-          FIX_COUNT=$(echo "$COMMITS" | grep -ciE "(fix|bug)" || echo 0)
-          UPDATE_COUNT=$(echo "$COMMITS" | grep -ciE "(update|change|refactor)" || echo 0)
+          # Count commits by type for summary (handle empty COMMITS)
+          if [ -z "$COMMITS" ]; then
+            FEATURE_COUNT=0
+            FIX_COUNT=0
+            UPDATE_COUNT=0
+          else
+            FEATURE_COUNT=$(echo "$COMMITS" | grep -ciE "(add|feat|feature)" || true)
+            FIX_COUNT=$(echo "$COMMITS" | grep -ciE "(fix|bug)" || true)
+            UPDATE_COUNT=$(echo "$COMMITS" | grep -ciE "(update|change|refactor)" || true)
+
+            # Ensure counts are numbers, default to 0 if empty
+            FEATURE_COUNT=${FEATURE_COUNT:-0}
+            FIX_COUNT=${FIX_COUNT:-0}
+            UPDATE_COUNT=${UPDATE_COUNT:-0}
+          fi
 
           echo "feature_count=$FEATURE_COUNT" >> $GITHUB_OUTPUT
           echo "fix_count=$FIX_COUNT" >> $GITHUB_OUTPUT
