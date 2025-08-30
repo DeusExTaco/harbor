@@ -14,7 +14,8 @@ from app.config import DeploymentProfile
 
 def test_security_headers_for_profiles():
     """Test security headers are generated correctly for each profile."""
-    for profile in DeploymentProfile:
+    # Fix: Explicitly iterate over enum members
+    for profile in list(DeploymentProfile):  # Convert to list to iterate
         headers = get_security_headers_for_profile(profile)
 
         # Common headers should always be present

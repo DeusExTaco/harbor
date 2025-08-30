@@ -53,14 +53,12 @@ async def get_current_user(
         # TODO: M0 - Implement API key validation
         # For now, return None (structure in place)
         logger.debug("API key authentication not yet implemented")
-        pass
 
     # Check HTTP Basic authentication
     if credentials:
         # TODO: M0 - Implement basic auth validation against database
         # For now, return None (structure in place)
         logger.debug("HTTP Basic authentication not yet implemented")
-        pass
 
     return None
 
