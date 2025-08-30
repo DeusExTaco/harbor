@@ -355,6 +355,25 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Set up additional middleware (M0 implementation)
+    try:
+        from app.middleware import (
+            AuthenticationMiddleware,
+            RequestLoggingMiddleware,
+        )
+
+        # Add request logging middleware (runs first to log all requests)
+        app.add_middleware(RequestLoggingMiddleware)
+
+        # Add authentication middleware (checks auth requirements)
+        app.add_middleware(AuthenticationMiddleware)
+
+        logger.info("Additional middleware configured successfully")
+    except ImportError as e:
+        logger.warning(f"Additional middleware not available: {e}")
+        if debug_mode:
+            print(f"⚠️ Additional middleware not available: {e}")
+
     # Set up security middleware (M0 milestone)
     if SECURITY_AVAILABLE:
         try:
