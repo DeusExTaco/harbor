@@ -1,67 +1,87 @@
+# deploy/docker/Dockerfile.dev
 # Harbor Container Updater - Development Dockerfile
-# Optimized for fast development cycles with hot reload
+# Enhanced Debian Slim with development tools
 
-FROM python:3.13-slim
+FROM python:3.13-slim-bullseye AS builder
 
-# Set optimization environment variables directly
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    DEBIAN_FRONTEND=noninteractive
+# Build-time optimizations
+ARG PIP_NO_CACHE_DIR=1
+ARG PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies with flexible versions
-RUN apt-get update && apt-get install -y \
-    --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    python3-dev \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY requirements/ requirements/
+
+# Build wheels for all dependencies with explicit --no-cache-dir
+RUN pip wheel --no-cache-dir --wheel-dir=/wheels \
+    -r requirements/base.txt \
+    -r requirements/development.txt
+
+# Final stage - Enhanced Debian Slim for development
+FROM python:3.13-slim-bullseye
+
+# Create non-root user (keep bash shell for development)
+RUN groupadd -r harbor --gid=1000 && \
+    useradd -r -g harbor --uid=1000 --home-dir=/app --shell=/bin/bash harbor
+
+# Install wheels
+COPY --from=builder /wheels /wheels
+RUN pip install --no-cache-dir --no-index --find-links=/wheels /wheels/* && \
+    rm -rf /wheels
+
+# Development tools and security updates
+RUN apt-get update && \
+    apt-get -y upgrade && \
+    apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
+    tzdata \
     git \
-    build-essential \
     vim \
     htop \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    procps \
+    iputils-ping \
+    net-tools \
+    && apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
+    # Clean up build dependencies - fix SC2015 by using if-then
+    if command -v gcc >/dev/null 2>&1; then \
+        apt-get purge -y --auto-remove gcc build-essential; \
+    fi
 
-# Create harbor user
-RUN groupadd -r harbor && useradd -r -g harbor harbor
-
-# Set working directory
 WORKDIR /app
 
-# Python environment (hadolint compliant - removed PIP_NO_CACHE_DIR)
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=${PYTHONDONTWRITEBYTECODE:-1} \
-    PIP_DISABLE_PIP_VERSION_CHECK=${PIP_DISABLE_PIP_VERSION_CHECK:-1}
+# Copy application with correct ownership
+COPY --chown=1000:1000 . .
 
-# Copy requirements and install dependencies
-COPY requirements/ ./requirements/
-COPY pyproject.toml ./
+# Create required directories with proper permissions
+RUN mkdir -p /app/data /app/logs /app/config /app/.cache && \
+    chmod -R u=rwX,go=rX /app && \
+    chown -R 1000:1000 /app
 
-# Install all dependencies with hadolint compliance
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -e ".[dev]"
-
-# Copy application code
-COPY --chown=harbor:harbor . .
-
-# Create development directories
-RUN mkdir -p /app/data /app/logs /app/config && \
-    chown -R harbor:harbor /app
-
-# Switch to harbor user
-USER harbor
+# Switch to non-root user
+USER 1000:1000
 
 # Development environment
-ENV HARBOR_MODE=development \
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    HARBOR_MODE=development \
     LOG_LEVEL=DEBUG \
     DEV_RELOAD=true \
-    ENABLE_AUTO_DISCOVERY=true
+    ENABLE_AUTO_DISCOVERY=true \
+    PATH="/home/harbor/.local/bin:$PATH"
 
-# Expose port
-EXPOSE 8080
+EXPOSE 8080 5678
 
-# Health check for development
+# Development health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD python scripts/health_check.py || exit 1
+    CMD ["python", "scripts/health_check.py"]
 
-# Development command with hot reload
-CMD ["python", "-m", "uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080", "--reload"]
+# Development with hot reload
+ENTRYPOINT ["python", "-m", "uvicorn", "app.main:create_app"]
+CMD ["--factory", "--host", "0.0.0.0", "--port", "8080", "--reload"]

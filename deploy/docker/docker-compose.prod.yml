@@ -1,10 +1,8 @@
 ---
 # deploy/docker/docker-compose.prod.yml
-# Harbor Container Updater - Secure Production Deployment
-
 
 services:
-  # Docker socket proxy for enhanced security
+  # Docker socket proxy
   socket-proxy:
     image: tecnativa/docker-socket-proxy:latest
     container_name: harbor-socket-proxy
@@ -16,72 +14,68 @@ services:
       VOLUMES: 1
       INFO: 1
       VERSION: 1
-      POST: 1  # Required for container operations
+      POST: 1
       BUILD: 0
       COMMIT: 0
       EXEC: 0
     volumes:
     - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
-    - harbor-internal
+    - harbor-backend
     security_opt:
     - no-new-privileges:true
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-          cpus: '0.5'
+    - apparmor:docker-default
+    cap_drop:
+    - ALL
+    read_only: true
+    tmpfs:
+    - /tmp:size=10M
 
   harbor:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile
+      secrets:
+      - pip_index_url
     image: harbor/harbor:latest
     container_name: harbor
     restart: unless-stopped
     depends_on:
     - socket-proxy
 
-    ports:
-    - 127.0.0.1:8080:8080      # Only localhost
-
-    volumes:
-    - harbor_data:/app/data
-    - harbor_logs:/app/logs
-    - ../../config/production.yaml:/app/config/production.yaml:ro
-
-    environment:
-      # Production mode
-    - HARBOR_MODE=production
-
-      # Use socket proxy
-    - DOCKER_HOST=tcp://socket-proxy:2375
-
-      # Security
-    - REQUIRE_HTTPS=true
-    - SESSION_TIMEOUT_HOURS=8
-    - API_RATE_LIMIT_PER_HOUR=5000
-    - HARBOR_SECRET_KEY_FILE=/run/secrets/harbor_secret
-
-      # Database (PostgreSQL example)
-      # - DATABASE_URL=postgresql://harbor:${DB_PASSWORD}@postgres:5432/harbor
-
-      # Monitoring
-    - ENABLE_METRICS=true
-    - ENABLE_HEALTH_CHECKS=true
-    - ENABLE_AUDIT_EXPORT=true
-
-      # Performance
-    - MAX_CONCURRENT_UPDATES=10
-    - HARBOR_MAX_WORKERS=4
-    - DATABASE_POOL_SIZE=20
-
-    networks:
-    - harbor-internal
-    - harbor-public
-
+    # Maximum security
     security_opt:
     - no-new-privileges:true
+    - apparmor:harbor-container    # Custom profile
+    - seccomp:./deploy/security/seccomp-harbor.json
+    cap_drop:
+    - ALL
+    read_only: true
+    tmpfs:
+    - /tmp:size=100M,mode=1777
+    - /run:size=10M,mode=755
+    - /app/.cache:size=50M,mode=755
+
+    user: 1000:1000
+
+    ports:
+    - 127.0.0.1:8080:8080
+
+    volumes:
+    - harbor_data:/app/data:rw
+    - harbor_logs:/app/logs:rw
+    - ./config/production.yaml:/app/config/production.yaml:ro
+    - ./deploy/security/apparmor-harbor:/etc/apparmor.d/harbor:ro
+
+    environment:
+    - HARBOR_MODE=production
+    - DOCKER_HOST=tcp://socket-proxy:2375
+    - PYTHONHASHSEED=random
+    - HARBOR_SECRET_KEY_FILE=/run/secrets/harbor_secret
+
+    networks:
+    - harbor-backend
+    - harbor-frontend
 
     secrets:
     - harbor_secret
@@ -89,29 +83,33 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
-          cpus: '2.0'
-        reservations:
-          memory: 1G
+          memory: 512M
           cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.5'
 
 networks:
-  harbor-internal:
+  harbor-backend:
     internal: true
     driver: bridge
-  harbor-public:
+    ipam:
+      config:
+      - subnet: 172.28.0.0/24
+  harbor-frontend:
     driver: bridge
+    ipam:
+      config:
+      - subnet: 172.29.0.0/24
 
 volumes:
   harbor_data:
     driver: local
-    labels:
-    - com.harbor.description=Harbor production data
   harbor_logs:
     driver: local
-    labels:
-    - com.harbor.description=Harbor production logs
 
 secrets:
   harbor_secret:
-    file: ../../secrets/harbor_secret.txt
+    external: true
+  pip_index_url:
+    file: ./secrets/pip_index_url.txt

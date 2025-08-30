@@ -1,65 +1,57 @@
 ---
 # deploy/docker/docker-compose.yml
-# Harbor Container Updater - Production Deployment (Home Lab Optimized)
+# Harbor Production Deployment - Enhanced Security
 
 services:
   harbor:
     build:
-      context: ../..  # Build from project root
+      context: ../..
       dockerfile: deploy/docker/Dockerfile
     image: harbor/harbor:latest
     container_name: harbor
     restart: unless-stopped
 
+    # Security options
+    security_opt:
+    - no-new-privileges:true
+    cap_drop:
+    - ALL
+    cap_add:
+    - NET_BIND_SERVICE    # Only if needed for port binding
+    read_only: true  # Read-only root filesystem
+    tmpfs:
+    - /tmp:size=100M,mode=1777
+    - /run:size=10M,mode=755
+    - /app/.cache:size=50M,mode=755
+
+    # Run as non-root user
+    user: 1000:1000
+
     ports:
     - 8080:8080
 
     volumes:
-      # Docker socket for container management (read-only)
+      # Docker socket (read-only)
     - /var/run/docker.sock:/var/run/docker.sock:ro
-      # Persistent data storage
-    - harbor_data:/app/data
-      # Logs persistence
-    - harbor_logs:/app/logs
-      # Optional: Custom configuration
-      # - ../../config:/app/config:ro
+      # Persistent data (writable)
+    - harbor_data:/app/data:rw
+      # Logs (writable)
+    - harbor_logs:/app/logs:rw
+      # Config (read-only)
+    - ./config:/app/config:ro
 
     environment:
-      # Deployment profile
     - HARBOR_MODE=homelab
-
-      # Logging
     - LOG_LEVEL=INFO
-    - LOG_RETENTION_DAYS=14
-
-      # Core features
     - ENABLE_AUTO_DISCOVERY=true
-    - ENABLE_GETTING_STARTED=true
-    - ENABLE_SIMPLE_MODE=true
-
-      # Database
     - DATABASE_URL=sqlite:////app/data/harbor.db
-
-      # Timezone
     - HARBOR_TIMEZONE=${TZ:-UTC}
-
-      # Update configuration
     - DEFAULT_CHECK_INTERVAL_SECONDS=86400
-    - DEFAULT_UPDATE_TIME=03:00
     - MAX_CONCURRENT_UPDATES=2
-
-      # Security (home lab defaults)
-    - REQUIRE_HTTPS=false
-    - SESSION_TIMEOUT_HOURS=168
-
-      # Resource optimization
-    - HARBOR_MAX_WORKERS=2
-    - DATABASE_POOL_SIZE=5
 
     labels:
     - harbor.exclude=true
     - com.harbor.deployment=homelab
-    - com.harbor.version=${VERSION:-0.1.0-M0}
 
     healthcheck:
       test: [CMD, python, scripts/health_check.py]
@@ -68,6 +60,7 @@ services:
       retries: 3
       start_period: 60s
 
+    # Resource limits
     deploy:
       resources:
         limits:
@@ -82,7 +75,6 @@ volumes:
     driver: local
     labels:
     - com.harbor.description=Harbor persistent data
-
   harbor_logs:
     driver: local
     labels:

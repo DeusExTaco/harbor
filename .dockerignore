@@ -1,40 +1,81 @@
-# .dockerignore
-# Git files
+# .dockerignore - Minimize build context
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.Python
+*.egg-info/
+*.egg
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Version control
 .git
 .github
 .gitignore
+.gitattributes
+
+# Testing
+.pytest_cache
+.coverage
+.coverage.*
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+pytest_cache/
+htmlcov/
+
+# Development
+.env
+.env.*
+!.env.example
+.venv
+env/
+venv/
+ENV/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
 
 # Documentation
 docs/
 *.md
-LICENSE
+!README.md
+!LICENSE
 
-# Development files
-.env*
-.vscode/
-.idea/
-*.pyc
-__pycache__/
-.pytest_cache/
-.coverage
-htmlcov/
+# Build artifacts
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
 
 # CI/CD
 .github/
-deploy/terraform/
-deploy/ansible/
-deploy/kubernetes/
+.gitlab-ci.yml
+.travis.yml
 
-# Testing
-tests/fixtures/
-tests/e2e/
-coverage.xml
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
 
-# Examples
-examples/
-
-# Logs and databases
-*.log
-*.db
-data/
-logs/
+# Misc
+*.bak
+*.tmp
+*.temp
+node_modules/

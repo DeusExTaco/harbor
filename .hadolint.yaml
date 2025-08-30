@@ -1,0 +1,25 @@
+---
+# .hadolint.yaml
+# Hadolint configuration for Harbor
+
+ignored:
+  # We're using --no-cache-dir explicitly everywhere now
+  # DL3042 - Already fixed in Dockerfiles above
+
+  # These might be acceptable for your use case:
+  # DL3008 - Pin versions in apt-get install (we want latest security updates)
+  # DL3009 - Delete apt lists after install (we're already doing this)
+
+trustedRegistries:
+- docker.io
+- gcr.io
+- ghcr.io
+
+override:
+  error:
+  - DL3001    # Ensure all commands are run in a single RUN instruction
+  - DL3002    # Do not switch users with USER multiple times
+  warning:
+  - DL3042    # Avoid cache directory with pip
+  info:
+  - SC2015    # Note about A && B || C construct

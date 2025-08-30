@@ -1,0 +1,34 @@
+#include <tunables/global>
+
+profile harbor-container flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  #include <abstractions/python>
+
+  # Allow network access
+  network inet stream,
+  network inet6 stream,
+
+  # Read access to app directory
+  /app/ r,
+  /app/** r,
+
+  # Write access to data and logs only
+  /app/data/ rw,
+  /app/data/** rw,
+  /app/logs/ rw,
+  /app/logs/** rw,
+
+  # Temp directory access
+  /tmp/ rw,
+  /tmp/** rw,
+
+  # Python needs
+  /usr/local/lib/python*/** r,
+  /usr/local/bin/python* ix,
+
+  # Deny everything else
+  deny /etc/passwd r,
+  deny /etc/shadow r,
+  deny /proc/*/mem rw,
+  deny /sys/kernel/** r,
+}
