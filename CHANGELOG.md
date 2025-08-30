@@ -19,6 +19,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 -
 
+## [0.1.0-alpha.4] - 2025-08-30
+
+### Added
+- Implement enhanced security and size optimizations
+- Add unified PR comment system for CI/CD pipeline summaries
+
+### Changed
+- Centralize version extraction with composite action
+- Optimize pipeline with caching and early exits
+
+### Fixed
+- Resolve Docker build and version bump workflow issues
+- Fix Docker entrypoint to support both runtime and test execution
+- Complete migration to composite action for version extraction
+- Fixed duplication issue in version-bump.yml
+- Remove parentheses from echo statement in docker-build
+- Correct Python quote escaping in version extraction
+- Correct PR comment generation in test and security workflows
+- Prevent PR comment job from running without valid PR context
+- Correct version extraction regex in version-bump workflow
+- Remove inline comments from YAML conditions
+- Prevent PR comment actions from running on non-PR events
+- Prevent duplicate PR comments
+- Update workflows for proper version syncing and auto-tagging
+
 ## [0.1.0-alpha.3] - 2024-XX-XX
 
 ### Added
