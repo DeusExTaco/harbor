@@ -109,7 +109,7 @@ jobs:
     needs: [ pre-flight-check, code-quality ]
     if: |
       needs.pre-flight-check.outputs.should-continue == 'true' &&
-      needs.code-quality.result == 'success'  # MODIFY - add first condition
+      needs.code-quality.result == 'success'
     uses: ./.github/workflows/test.yml
     secrets: inherit # pragma: allowlist secret
     with:
@@ -125,7 +125,7 @@ jobs:
     needs: [ pre-flight-check, test-suite, static-security, dependency-security ]
     if: |
       always() &&
-      needs.pre-flight-check.outputs.should-continue == 'true' &&  # ADD THIS LINE
+      needs.pre-flight-check.outputs.should-continue == 'true' &&
       needs.test-suite.outputs.tests-passed == 'true' &&
       (needs.static-security.result == 'success' || needs.static-security.result == 'skipped') &&
       (needs.dependency-security.result == 'success' || needs.dependency-security.result == 'skipped')
@@ -300,7 +300,7 @@ jobs:
     name: Docker Build & Publish
     needs: [ pre-flight-check, build-config ]
     if: |
-      needs.pre-flight-check.outputs.should-continue == 'true' &&  # ADD THIS LINE
+      needs.pre-flight-check.outputs.should-continue == 'true' &&
       needs.build-config.outputs.should-build == 'true'
     uses: ./.github/workflows/docker-build.yml
     secrets: inherit # pragma: allowlist secret
@@ -316,7 +316,7 @@ jobs:
     needs: [ pre-flight-check, build-config, docker-build ]
     if: |
       always() &&
-      needs.pre-flight-check.outputs.should-continue == 'true' &&  # ADD THIS LINE
+      needs.pre-flight-check.outputs.should-continue == 'true' &&
       needs.docker-build.outputs.build-successful == 'true'
     uses: ./.github/workflows/security.yml
     secrets: inherit # pragma: allowlist secret
@@ -335,7 +335,7 @@ jobs:
     needs: [ pre-flight-check, docker-build, container-security ]
     if: |
       always() &&
-      needs.pre-flight-check.outputs.should-continue == 'true' &&  # ADD THIS LINE
+      needs.pre-flight-check.outputs.should-continue == 'true' &&
       needs.docker-build.outputs.build-successful == 'true' &&
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
 
@@ -491,7 +491,7 @@ jobs:
     needs: [ pre-flight-check, build-config, docker-build, container-security ]
     if: |
       always() &&
-      needs.pre-flight-check.outputs.should-continue == 'true' &&  # ADD THIS LINE
+      needs.pre-flight-check.outputs.should-continue == 'true' &&
       needs.build-config.outputs.is-release == 'true' &&
       needs.docker-build.outputs.build-successful == 'true' &&
       (needs.container-security.result == 'success' || needs.container-security.result == 'skipped')
@@ -724,7 +724,7 @@ jobs:
     if: |
       github.event_name == 'pull_request' &&
       github.event.pull_request.number != null &&
-      always()  # Keep as always() to update PR even when skipped
+      always()
     runs-on: ubuntu-latest
 
     permissions:
