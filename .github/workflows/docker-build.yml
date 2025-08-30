@@ -101,7 +101,7 @@ jobs:
             echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:$BRANCH_NAME,${{ env.REGISTRY_IMAGE_DOCKERHUB }}:$VERSION" >> $GITHUB_OUTPUT
             echo "ghcr-tags=${{ env.REGISTRY_IMAGE_GHCR }}:$BRANCH_NAME,${{ env.REGISTRY_IMAGE_GHCR }}:$VERSION" >> $GITHUB_OUTPUT
             echo "dockerfile=deploy/docker/Dockerfile.dev" >> $GITHUB_OUTPUT
-            echo "ðŸ"¦ Feature branch ($BRANCH_NAME) - using dev Dockerfile with branch tags"
+            echo "ðŸ"¦ Feature branch: $BRANCH_NAME - using dev Dockerfile with branch tags"
           fi
 
   # =============================================================================

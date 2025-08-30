@@ -46,7 +46,7 @@ jobs:
               with open('app/__init__.py', 'r') as f:
                   content = f.read()
                   # Handle both single and double quotes
-                  match = re.search(r'__version__\s*=\s*["'"'"'](.*?)["'"'"']', content)
+                  match = re.search(r"__version__\s*=\s*[\"'"'"'"](.*?)[\"'"'"'"]", content)
                   if match:
                       print(match.group(1))
                   else:
