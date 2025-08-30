@@ -1,4 +1,5 @@
 # .github/workflows/version-bump.yml
+# .github/workflows/version-bump.yml
 name: Auto Version Bump
 
 on:
@@ -28,6 +29,11 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
       - name: Get current version
         id: current-version
         uses: ./.github/actions/get-version
@@ -36,73 +42,6 @@ jobs:
         id: new-version
         run: |
           CURRENT="${{ steps.current-version.outputs.version }}"
-
-          # Parse the version components
-          if [[ $CURRENT =~ ^([0-9]+\.[0-9]+\.[0-9]+)-alpha\.([0-9]+)$ ]]; then
-            BASE_VERSION="${BASH_REMATCH[1]}"
-            ALPHA_NUM="${BASH_REMATCH[2]}"
-
-            # Increment alpha number
-            NEW_ALPHA_NUM=$((ALPHA_NUM + 1))
-            NEW_VERSION="${BASE_VERSION}-alpha.${NEW_ALPHA_NUM}"
-
-            echo "New version: $NEW_VERSION"
-            echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
-            echo "base=$BASE_VERSION" >> $GITHUB_OUTPUT
-            echo "alpha=$NEW_ALPHA_NUM" >> $GITHUB_OUTPUT
-          else
-            echo "Error: Version format not recognized: $CURRENT"
-            echo "Expected format: X.Y.Z-alpha.N"
-            exit 1
-          fi
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Get current version
-        id: current-version
-        run: |
-          # Extract current version from app/__init__.py
-          if [ -f "app/__init__.py" ]; then
-            # More robust extraction handling both quote types
-            CURRENT_VERSION=$(python -c "
-          import re
-          import sys
-          try:
-              with open('app/__init__.py', 'r') as f:
-                  content = f.read()
-                  # Handle both single and double quotes
-                  match = re.search(r"__version__\s*=\s*[\"'"'"'"](.*?)[\"'"'"'"]", content)
-                  if match:
-                      print(match.group(1))
-                  else:
-                      print('ERROR: __version__ not found in correct format', file=sys.stderr)
-                      sys.exit(1)
-          except Exception as e:
-              print(f'ERROR: {e}', file=sys.stderr)
-              sys.exit(1)
-            ")
-
-            if [ $? -ne 0 ]; then
-              echo "Error: Failed to extract version from app/__init__.py"
-              echo "File contents:"
-              head -20 app/__init__.py
-              exit 1
-            fi
-
-            echo "Current version: $CURRENT_VERSION"
-            echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-          else
-            echo "Error: app/__init__.py not found"
-            exit 1
-          fi
-
-      - name: Calculate new version
-        id: new-version
-        run: |
-          CURRENT="${{ steps.current-version.outputs.current }}"
 
           # Parse the version components
           if [[ $CURRENT =~ ^([0-9]+\.[0-9]+\.[0-9]+)-alpha\.([0-9]+)$ ]]; then
