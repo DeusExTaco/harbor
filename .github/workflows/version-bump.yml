@@ -38,7 +38,32 @@ jobs:
         run: |
           # Extract current version from app/__init__.py
           if [ -f "app/__init__.py" ]; then
-            CURRENT_VERSION=$(grep "__version__" app/__init__.py | cut -d'"' -f2)
+            # More robust extraction handling both quote types
+            CURRENT_VERSION=$(python -c "
+          import re
+          import sys
+          try:
+              with open('app/__init__.py', 'r') as f:
+                  content = f.read()
+                  # Handle both single and double quotes
+                  match = re.search(r'__version__\s*=\s*["'"'"'](.*?)["'"'"']', content)
+                  if match:
+                      print(match.group(1))
+                  else:
+                      print('ERROR: __version__ not found in correct format', file=sys.stderr)
+                      sys.exit(1)
+          except Exception as e:
+              print(f'ERROR: {e}', file=sys.stderr)
+              sys.exit(1)
+            ")
+
+            if [ $? -ne 0 ]; then
+              echo "Error: Failed to extract version from app/__init__.py"
+              echo "File contents:"
+              head -20 app/__init__.py
+              exit 1
+            fi
+
             echo "Current version: $CURRENT_VERSION"
             echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
           else

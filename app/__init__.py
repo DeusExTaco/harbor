@@ -30,7 +30,7 @@ __profiles__ = ["homelab", "development", "staging", "production"]
 
 # Development milestone (M0 = Foundation)
 __milestone__ = "M0"
-__status__ = "Pre-Alpha"
+__status__ = "Development"
 
 # Import key components for easy access
 try:
