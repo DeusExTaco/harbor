@@ -28,6 +28,34 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
+      - name: Get current version
+        id: current-version
+        uses: ./.github/actions/get-version
+
+      - name: Calculate new version
+        id: new-version
+        run: |
+          CURRENT="${{ steps.current-version.outputs.version }}"
+
+          # Parse the version components
+          if [[ $CURRENT =~ ^([0-9]+\.[0-9]+\.[0-9]+)-alpha\.([0-9]+)$ ]]; then
+            BASE_VERSION="${BASH_REMATCH[1]}"
+            ALPHA_NUM="${BASH_REMATCH[2]}"
+
+            # Increment alpha number
+            NEW_ALPHA_NUM=$((ALPHA_NUM + 1))
+            NEW_VERSION="${BASE_VERSION}-alpha.${NEW_ALPHA_NUM}"
+
+            echo "New version: $NEW_VERSION"
+            echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "base=$BASE_VERSION" >> $GITHUB_OUTPUT
+            echo "alpha=$NEW_ALPHA_NUM" >> $GITHUB_OUTPUT
+          else
+            echo "Error: Version format not recognized: $CURRENT"
+            echo "Expected format: X.Y.Z-alpha.N"
+            exit 1
+          fi
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:

@@ -1,0 +1,93 @@
+---
+name: Get Harbor Version
+description: Extract version information from Harbor source files
+outputs:
+  version:
+    description: The extracted version
+    value: ${{ steps.extract.outputs.version }}
+  milestone:
+    description: The current milestone
+    value: ${{ steps.extract.outputs.milestone }}
+  is-alpha:
+    description: Whether this is an alpha version
+    value: ${{ steps.extract.outputs.is-alpha }}
+  is-prerelease:
+    description: Whether this is a prerelease version
+    value: ${{ steps.extract.outputs.is-prerelease }}
+
+runs:
+  using: composite
+  steps:
+  - name: Extract version info
+    id: extract
+    shell: bash
+    run: |
+      # Create inline Python script to extract version using AST
+      cat > /tmp/extract_version.py << 'EOF'
+      import ast
+      import sys
+      from pathlib import Path
+
+      def get_info():
+          init_file = Path('app/__init__.py')
+
+          if not init_file.exists():
+              # Fallback to pyproject.toml
+              pyproject = Path('pyproject.toml')
+              if pyproject.exists():
+                  with open(pyproject) as f:
+                      for line in f:
+                          if line.startswith('version = '):
+                              version = line.split('"')[1]
+                              print(f"version={version}")
+                              print(f"milestone=M0")  # Default
+                              print(f"is-alpha={'alpha' in version}")
+                              print(f"is-prerelease={'alpha' in version or 'beta' in version or 'rc' in version}")
+                              return
+              print("ERROR: No version source found", file=sys.stderr)
+              sys.exit(1)
+
+          with open(init_file, 'r') as f:
+              tree = ast.parse(f.read())
+
+          version = None
+          milestone = 'M0'
+
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Assign):
+                  for target in node.targets:
+                      if isinstance(target, ast.Name):
+                          if target.id == '__version__':
+                              if isinstance(node.value, (ast.Constant, ast.Str)):
+                                  version = node.value.value if isinstance(node.value, ast.Constant) else node.value.s
+                          elif target.id == '__milestone__':
+                              if isinstance(node.value, (ast.Constant, ast.Str)):
+                                  milestone = node.value.value if isinstance(node.value, ast.Constant) else node.value.s
+
+          if version:
+              print(f"version={version}")
+              print(f"milestone={milestone}")
+              print(f"is-alpha={'alpha' in version.lower()}")
+              print(f"is-prerelease={'alpha' in version.lower() or 'beta' in version.lower() or 'rc' in version.lower()}")
+          else:
+              print("ERROR: __version__ not found", file=sys.stderr)
+              sys.exit(1)
+
+      get_info()
+      EOF
+
+      # Run the extraction
+      if ! python /tmp/extract_version.py > /tmp/version_info.txt 2>&1; then
+        echo "Failed to extract version:"
+        cat /tmp/version_info.txt
+        exit 1
+      fi
+
+      # Parse output and set GitHub outputs
+      while IFS='=' read -r key value; do
+        echo "${key}=${value}" >> $GITHUB_OUTPUT
+      done < /tmp/version_info.txt
+
+      # Display what we found
+      echo "📦 Version: $(grep '^version=' /tmp/version_info.txt | cut -d= -f2)"
+      echo "🎯 Milestone: $(grep '^milestone=' /tmp/version_info.txt | cut -d= -f2)"
