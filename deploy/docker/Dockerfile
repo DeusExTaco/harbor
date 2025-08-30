@@ -9,7 +9,7 @@ ARG PIP_NO_CACHE_DIR=1
 ARG PIP_DISABLE_PIP_VERSION_CHECK=1
 ARG PYTHONDONTWRITEBYTECODE=1
 
-# Create non-root user for builder stage too
+# Create non-root user for builder stage
 RUN groupadd -r builder --gid=1001 && \
     useradd -r -g builder --uid=1001 --home-dir=/build --create-home builder
 
@@ -27,15 +27,20 @@ RUN chown -R builder:builder /build
 # Switch to non-root user for pip operations
 USER builder
 
+# Set PATH to include user's local bin directory
+ENV PATH="/build/.local/bin:${PATH}"
+ENV PYTHONPATH="/build/.local/lib/python3.13/site-packages:${PYTHONPATH}"
+
 # Build wheels as non-root user
 RUN pip wheel --no-cache-dir --wheel-dir=/build/wheels \
     -r requirements/base.txt \
     -r requirements/production.txt
 
 # Generate SBOM as non-root user
+# Use pip-licenses directly from PATH instead of python -m
 RUN pip install --user --no-cache-dir pip-licenses && \
-    python -m pip_licenses --format=json --with-urls -l > /build/sbom.json && \
-    python -m pip_licenses --format=markdown > /build/sbom.md && \
+    pip-licenses --format=json --with-urls -l > /build/sbom.json && \
+    pip-licenses --format=markdown > /build/sbom.md && \
     pip uninstall -y pip-licenses
 
 # Final stage - Fully optimized
