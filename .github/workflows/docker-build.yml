@@ -291,14 +291,14 @@ jobs:
       # Output build information for debugging
       - name: Build information
         run: |
-          echo "ðŸ—¿ Build completed successfully!"
-          echo "ðŸ"¦ Docker Hub tags: ${{ needs.build-config.outputs.docker-tags }}"
-          echo "ðŸ"¦ GHCR tags: ${{ needs.build-config.outputs.ghcr-tags }}"
-          echo "ðŸ³ Dockerfile: ${{ needs.build-config.outputs.dockerfile }}"
-          echo "ðŸŒ Platform: linux/amd64"
-          echo "ðŸ" Git SHA: ${{ github.sha }}"
-          echo "ðŸ·ï¸ Version: ${{ needs.build-config.outputs.harbor-version }}"
-          echo "ðŸ'¾ Cache strategy: ${{ steps.cache-strategy.outputs.cache-type }}"
+          echo ">>> Build completed successfully!"
+          echo "==> Docker Hub tags: ${{ needs.build-config.outputs.docker-tags }}"
+          echo "==> GHCR tags: ${{ needs.build-config.outputs.ghcr-tags }}"
+          echo "==> Dockerfile: ${{ needs.build-config.outputs.dockerfile }}"
+          echo "==> Platform: linux/amd64"
+          echo "==> Git SHA: ${{ github.sha }}"
+          echo "==> Version: ${{ needs.build-config.outputs.harbor-version }}"
+          echo "==> Cache strategy: ${{ steps.cache-strategy.outputs.cache-type }}"
 
   # =============================================================================
   # Image Testing & Validation
