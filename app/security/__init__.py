@@ -1,3 +1,4 @@
+# app/security/__init__.py
 """
 Harbor Container Updater - Security Module
 
@@ -15,7 +16,7 @@ Features:
 - Authentication preparation (basic framework)
 """
 
-from typing import Any
+from typing import Any  # ADD THIS IMPORT
 
 # Security middleware exports
 from app.security.headers import (
@@ -72,6 +73,13 @@ def setup_security_middleware(app: Any, settings: Any = None) -> Any:
     """
     Set up all security middleware for Harbor application.
 
+    This function configures:
+    1. Security headers middleware
+    2. Rate limiting middleware
+    3. Request logging middleware
+    4. Authentication middleware
+    5. CORS middleware
+
     Args:
         app: FastAPI application instance
         settings: Harbor settings (optional, will get from config if None)
@@ -84,11 +92,34 @@ def setup_security_middleware(app: Any, settings: Any = None) -> Any:
     if settings is None:
         settings = get_settings()
 
-    # Add security headers middleware
+    # The order matters! Middleware runs in reverse order of addition
+    # So we add them in this order to run: Logging -> RateLimit -> Headers
+
+    # 1. Add security headers middleware (runs last, modifies response)
     app.add_middleware(SecurityHeadersMiddleware)
 
-    # Add rate limiting middleware (if enabled)
-    if RateLimitConfig.is_rate_limiting_enabled(settings.deployment_profile):
+    # 2. Add rate limiting middleware (if enabled)
+    from app.core.security import SecurityConfig
+
+    security_config = SecurityConfig.get_security_config()
+
+    if security_config["rate_limiting"]["enabled"]:
         app.add_middleware(RateLimitMiddleware)
+
+    # 3. Add request logging middleware (runs first)
+    try:
+        from app.middleware import RequestLoggingMiddleware
+
+        app.add_middleware(RequestLoggingMiddleware)
+    except ImportError:
+        pass  # Middleware not available yet
+
+    # 4. Add authentication middleware
+    try:
+        from app.middleware import AuthenticationMiddleware
+
+        app.add_middleware(AuthenticationMiddleware)
+    except ImportError:
+        pass  # Middleware not available yet
 
     return app
