@@ -1,5 +1,4 @@
 # .github/workflows/version-bump.yml
-# .github/workflows/version-bump.yml
 name: Auto Version Bump
 
 on:
@@ -66,49 +65,44 @@ jobs:
         run: |
           NEW_VERSION="${{ steps.new-version.outputs.new }}"
 
-          # Update app/__init__.py
           python -c "
-          import re
+          import sys
+          new_version = '$NEW_VERSION'
 
+          # Update app/__init__.py
           with open('app/__init__.py', 'r') as f:
-              content = f.read()
-
-          # Update version
-          content = re.sub(
-              r'__version__ = [\"'][^\"']+[\"']',
-              f'__version__ = \"{NEW_VERSION}\"',
-              content
-          )
+              lines = f.readlines()
 
           with open('app/__init__.py', 'w') as f:
-              f.write(content)
+              for line in lines:
+                  if line.startswith('__version__'):
+                      f.write(f'__version__ = \"{new_version}\"\n')
+                  else:
+                      f.write(line)
 
-          print(f'Updated app/__init__.py to version {NEW_VERSION}')
+          print(f'Updated app/__init__.py to version {new_version}')
           "
 
       - name: Update version in pyproject.toml
         run: |
           NEW_VERSION="${{ steps.new-version.outputs.new }}"
 
-          # Update pyproject.toml
           python -c "
-          import re
+          import sys
+          new_version = '$NEW_VERSION'
 
+          # Update pyproject.toml
           with open('pyproject.toml', 'r') as f:
-              content = f.read()
-
-          # Update version
-          content = re.sub(
-              r'^version = \"[^\"]+\"',
-              f'version = \"{NEW_VERSION}\"',
-              content,
-              flags=re.MULTILINE
-          )
+              lines = f.readlines()
 
           with open('pyproject.toml', 'w') as f:
-              f.write(content)
+              for line in lines:
+                  if line.startswith('version ='):
+                      f.write(f'version = \"{new_version}\"\n')
+                  else:
+                      f.write(line)
 
-          print(f'Updated pyproject.toml to version {NEW_VERSION}')
+          print(f'Updated pyproject.toml to version {new_version}')
           "
 
       - name: Get recent commits for changelog
@@ -144,159 +138,123 @@ jobs:
           NEW_VERSION="${{ steps.new-version.outputs.new }}"
           CURRENT_DATE=$(date +%Y-%m-%d)
 
-          # Create Python script to update changelog
-          cat > update_changelog.py << 'PYTHON_SCRIPT'
-          import re
-          import sys
-          from datetime import datetime
-
-          new_version = sys.argv[1]
-          current_date = sys.argv[2]
-
-          # Read recent commits
-          with open('recent_commits.txt', 'r') as f:
-              commits = [line.strip() for line in f.readlines() if line.strip()]
-
-          # Categorize commits
-          added = []
-          changed = []
-          fixed = []
-          security = []
-
-          for commit in commits:
-              commit_lower = commit.lower()
-              # Clean up commit message - remove conventional commit prefixes
-              clean_commit = re.sub(r'^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\([\w\-]+\))?:\s*', '', commit, flags=re.IGNORECASE)
-              clean_commit = clean_commit[0].upper() + clean_commit[1:] if clean_commit else commit
-
-              if any(word in commit_lower for word in ['add', 'feat', 'feature', 'implement', 'create']):
-                  added.append(f"- {clean_commit}")
-              elif any(word in commit_lower for word in ['fix', 'bug', 'resolve', 'correct']):
-                  fixed.append(f"- {clean_commit}")
-              elif any(word in commit_lower for word in ['security', 'cve', 'vulnerability']):
-                  security.append(f"- {clean_commit}")
-              elif any(word in commit_lower for word in ['update', 'change', 'refactor', 'improve', 'enhance']):
-                  changed.append(f"- {clean_commit}")
-              else:
-                  changed.append(f"- {clean_commit}")
-
-          # Read current changelog
-          try:
-              with open('CHANGELOG.md', 'r') as f:
-                  content = f.read()
-          except FileNotFoundError:
-              # Create new changelog if it doesn't exist
-              content = """# Changelog
-
-          All notable changes to Harbor Container Updater will be documented in this file.
-
-          The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-          and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-          ## [Unreleased]
-
-          ### Added
-          -
-
-          ### Changed
-          -
-
-          ### Fixed
-          -
-
-          ### Security
-          -
-
-          """
-
-          # Check if version already exists
-          if f"## [{new_version}]" in content:
-              print(f"Version {new_version} already exists in CHANGELOG")
-              sys.exit(0)
-
-          # Create new version section
-          new_section = f"\n## [{new_version}] - {current_date}\n"
-
-          if added:
-              new_section += "\n### Added\n"
-              new_section += "\n".join(added) + "\n"
-
-          if changed:
-              new_section += "\n### Changed\n"
-              new_section += "\n".join(changed) + "\n"
-
-          if fixed:
-              new_section += "\n### Fixed\n"
-              new_section += "\n".join(fixed) + "\n"
-
-          if security:
-              new_section += "\n### Security\n"
-              new_section += "\n".join(security) + "\n"
-
-          # If no commits categorized, add a generic entry
-          if not (added or changed or fixed or security):
-              new_section += "\n### Changed\n"
-              new_section += "- Version bump and minor improvements\n"
-
-          # Find where to insert the new section
-          if "## [Unreleased]" in content:
-              # Find the end of the Unreleased section
-              unreleased_match = re.search(r'## \[Unreleased\].*?(?=\n## \[|\n\[Unreleased\]:|$)', content, re.DOTALL)
-              if unreleased_match:
-                  insert_pos = unreleased_match.end()
-                  content = content[:insert_pos] + new_section + content[insert_pos:]
-          else:
-              # Insert after the header
-              lines = content.split('\n')
-              for i, line in enumerate(lines):
-                  if line.startswith('## ['):
-                      lines.insert(i, new_section.strip())
-                      break
-              else:
-                  # No version sections found, append at end
-                  lines.append(new_section.strip())
-              content = '\n'.join(lines)
-
-          # Update the version links at the bottom
-          if '[Unreleased]:' in content:
-              content = re.sub(
-                  r'\[Unreleased\]: https://github\.com/[^/]+/[^/]+/compare/[^.]+\.\.\.HEAD',
-                  f'[Unreleased]: https://github.com/DeusExTaco/harbor/compare/v{new_version}...HEAD',
-                  content
-              )
-
-          # Add version comparison link
-          if f'[{new_version}]:' not in content:
-              # Find where to add the link
-              lines = content.split('\n')
-              for i, line in enumerate(lines):
-                  if '[Unreleased]:' in line:
-                      # Get previous version from the next link
-                      prev_version = None
-                      if i + 1 < len(lines):
-                          match = re.match(r'\[([^\]]+)\]:', lines[i + 1])
-                          if match:
-                              prev_version = match.group(1)
-
-                      if prev_version:
-                          new_link = f'[{new_version}]: https://github.com/DeusExTaco/harbor/compare/v{prev_version}...v{new_version}'
-                      else:
-                          new_link = f'[{new_version}]: https://github.com/DeusExTaco/harbor/releases/tag/v{new_version}'
-
-                      lines.insert(i + 1, new_link)
-                      break
-              else:
-                  # No links section found, add at end
-                  lines.append(f'\n[{new_version}]: https://github.com/DeusExTaco/harbor/releases/tag/v{new_version}')
-
-              content = '\n'.join(lines)
-
-          # Write updated changelog
-          with open('CHANGELOG.md', 'w') as f:
-              f.write(content)
-
-          print(f"Updated CHANGELOG.md with version {new_version}")
-          PYTHON_SCRIPT
+          # Create update_changelog.py file
+          echo "import re" > update_changelog.py
+          echo "import sys" >> update_changelog.py
+          echo "from datetime import datetime" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "new_version = sys.argv[1]" >> update_changelog.py
+          echo "current_date = sys.argv[2]" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "# Read recent commits" >> update_changelog.py
+          echo "with open('recent_commits.txt', 'r') as f:" >> update_changelog.py
+          echo "    commits = [line.strip() for line in f.readlines() if line.strip()]" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "# Categorize commits" >> update_changelog.py
+          echo "added = []" >> update_changelog.py
+          echo "changed = []" >> update_changelog.py
+          echo "fixed = []" >> update_changelog.py
+          echo "security = []" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "for commit in commits:" >> update_changelog.py
+          echo "    commit_lower = commit.lower()" >> update_changelog.py
+          echo "    # Clean up commit message - remove conventional commit prefixes" >> update_changelog.py
+          echo "    clean_commit = re.sub(r'^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\([\w\-]+\))?:\s*', '', commit, flags=re.IGNORECASE)" >> update_changelog.py
+          echo "    clean_commit = clean_commit[0].upper() + clean_commit[1:] if clean_commit else commit" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "    if any(word in commit_lower for word in ['add', 'feat', 'feature', 'implement', 'create']):" >> update_changelog.py
+          echo "        added.append(f'- {clean_commit}')" >> update_changelog.py
+          echo "    elif any(word in commit_lower for word in ['fix', 'bug', 'resolve', 'correct']):" >> update_changelog.py
+          echo "        fixed.append(f'- {clean_commit}')" >> update_changelog.py
+          echo "    elif any(word in commit_lower for word in ['security', 'cve', 'vulnerability']):" >> update_changelog.py
+          echo "        security.append(f'- {clean_commit}')" >> update_changelog.py
+          echo "    elif any(word in commit_lower for word in ['update', 'change', 'refactor', 'improve', 'enhance']):" >> update_changelog.py
+          echo "        changed.append(f'- {clean_commit}')" >> update_changelog.py
+          echo "    else:" >> update_changelog.py
+          echo "        changed.append(f'- {clean_commit}')" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "# Read current changelog" >> update_changelog.py
+          echo "try:" >> update_changelog.py
+          echo "    with open('CHANGELOG.md', 'r') as f:" >> update_changelog.py
+          echo "        content = f.read()" >> update_changelog.py
+          echo "except FileNotFoundError:" >> update_changelog.py
+          echo "    # Create new changelog if it doesn't exist" >> update_changelog.py
+          echo "    content = '''# Changelog" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "All notable changes to Harbor Container Updater will be documented in this file." >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)," >> update_changelog.py
+          echo "and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)." >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "## [Unreleased]" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "### Added" >> update_changelog.py
+          echo "-" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "### Changed" >> update_changelog.py
+          echo "-" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "### Fixed" >> update_changelog.py
+          echo "-" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "### Security" >> update_changelog.py
+          echo "-" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "'''" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "# Check if version already exists" >> update_changelog.py
+          echo "if f'## [{new_version}]' in content:" >> update_changelog.py
+          echo "    print(f'Version {new_version} already exists in CHANGELOG')" >> update_changelog.py
+          echo "    sys.exit(0)" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "# Create new version section" >> update_changelog.py
+          echo "new_section = f'\\n## [{new_version}] - {current_date}\\n'" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "if added:" >> update_changelog.py
+          echo "    new_section += '\\n### Added\\n'" >> update_changelog.py
+          echo "    new_section += '\\n'.join(added) + '\\n'" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "if changed:" >> update_changelog.py
+          echo "    new_section += '\\n### Changed\\n'" >> update_changelog.py
+          echo "    new_section += '\\n'.join(changed) + '\\n'" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "if fixed:" >> update_changelog.py
+          echo "    new_section += '\\n### Fixed\\n'" >> update_changelog.py
+          echo "    new_section += '\\n'.join(fixed) + '\\n'" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "if security:" >> update_changelog.py
+          echo "    new_section += '\\n### Security\\n'" >> update_changelog.py
+          echo "    new_section += '\\n'.join(security) + '\\n'" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "# If no commits categorized, add a generic entry" >> update_changelog.py
+          echo "if not (added or changed or fixed or security):" >> update_changelog.py
+          echo "    new_section += '\\n### Changed\\n'" >> update_changelog.py
+          echo "    new_section += '- Version bump and minor improvements\\n'" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "# Find where to insert the new section" >> update_changelog.py
+          echo "if '## [Unreleased]' in content:" >> update_changelog.py
+          echo "    # Find the end of the Unreleased section" >> update_changelog.py
+          echo "    unreleased_match = re.search(r'## \[Unreleased\].*?(?=\\n## \[|\\n\[Unreleased\]:|$)', content, re.DOTALL)" >> update_changelog.py
+          echo "    if unreleased_match:" >> update_changelog.py
+          echo "        insert_pos = unreleased_match.end()" >> update_changelog.py
+          echo "        content = content[:insert_pos] + new_section + content[insert_pos:]" >> update_changelog.py
+          echo "else:" >> update_changelog.py
+          echo "    # Insert after the header" >> update_changelog.py
+          echo "    lines = content.split('\\n')" >> update_changelog.py
+          echo "    for i, line in enumerate(lines):" >> update_changelog.py
+          echo "        if line.startswith('## ['):" >> update_changelog.py
+          echo "            lines.insert(i, new_section.strip())" >> update_changelog.py
+          echo "            break" >> update_changelog.py
+          echo "    else:" >> update_changelog.py
+          echo "        # No version sections found, append at end" >> update_changelog.py
+          echo "        lines.append(new_section.strip())" >> update_changelog.py
+          echo "    content = '\\n'.join(lines)" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "# Write updated changelog" >> update_changelog.py
+          echo "with open('CHANGELOG.md', 'w') as f:" >> update_changelog.py
+          echo "    f.write(content)" >> update_changelog.py
+          echo "" >> update_changelog.py
+          echo "print(f'Updated CHANGELOG.md with version {new_version}')" >> update_changelog.py
 
           python update_changelog.py "$NEW_VERSION" "$CURRENT_DATE"
 
@@ -304,45 +262,59 @@ jobs:
         run: |
           NEW_VERSION="${{ steps.new-version.outputs.new }}"
 
-          # Verify both files have the same version
           python -c "
-          import re
           import sys
+
+          expected_version = '$NEW_VERSION'
+          errors = []
 
           # Check app/__init__.py
           with open('app/__init__.py', 'r') as f:
-              content = f.read()
-              match = re.search(r'__version__ = [\"']([^\"']+)[\"']', content)
-              app_version = match.group(1) if match else None
+              app_version = None
+              for line in f:
+                  if line.startswith('__version__'):
+                      parts = line.split('=', 1)
+                      if len(parts) == 2:
+                          app_version = parts[1].strip().strip('\"').strip(\"'\")
+                      break
+
+              if not app_version:
+                  errors.append('Could not find __version__ in app/__init__.py')
+              elif app_version != expected_version:
+                  errors.append(f'app/__init__.py has wrong version: {app_version} (expected {expected_version})')
 
           # Check pyproject.toml
           with open('pyproject.toml', 'r') as f:
-              content = f.read()
-              match = re.search(r'^version = \"([^\"]+)\"', content, re.MULTILINE)
-              proj_version = match.group(1) if match else None
+              proj_version = None
+              for line in f:
+                  if line.startswith('version ='):
+                      parts = line.split('=', 1)
+                      if len(parts) == 2:
+                          proj_version = parts[1].strip().strip('\"').strip(\"'\")
+                      break
+
+              if not proj_version:
+                  errors.append('Could not find version in pyproject.toml')
+              elif proj_version != expected_version:
+                  errors.append(f'pyproject.toml has wrong version: {proj_version} (expected {expected_version})')
 
           # Check CHANGELOG.md
           with open('CHANGELOG.md', 'r') as f:
               content = f.read()
-              changelog_has_version = f'## [{NEW_VERSION}]' in content
+              if f'## [{expected_version}]' not in content:
+                  errors.append(f'CHANGELOG.md does not contain version {expected_version}')
 
-          print(f'app/__init__.py version: {app_version}')
-          print(f'pyproject.toml version: {proj_version}')
-          print(f'CHANGELOG.md has version {NEW_VERSION}: {changelog_has_version}')
-
-          if app_version != proj_version:
-              print('Version mismatch between app/__init__.py and pyproject.toml!')
+          # Report results
+          if errors:
+              print('Version verification failed:')
+              for error in errors:
+                  print(f'  - {error}')
               sys.exit(1)
-
-          if app_version != '${NEW_VERSION}':
-              print(f'Version not updated correctly. Expected: ${NEW_VERSION}, Got: {app_version}')
-              sys.exit(1)
-
-          if not changelog_has_version:
-              print(f'CHANGELOG.md was not updated with version ${NEW_VERSION}')
-              sys.exit(1)
-
-          print('All files are consistently updated')
+          else:
+              print(f'All files correctly updated to version {expected_version}')
+              print(f'  - app/__init__.py: {app_version}')
+              print(f'  - pyproject.toml: {proj_version}')
+              print(f'  - CHANGELOG.md: contains [{expected_version}]')
           "
 
       - name: Commit version bump and changelog
