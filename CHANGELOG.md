@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 -
 
+## [0.1.0-alpha.6] - 2025-08-30
+
+### Added
+- M0 Foundation (#42)
+
 ## [0.1.0-alpha.5] - 2025-08-30
 
 ### Added
