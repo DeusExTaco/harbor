@@ -7,7 +7,6 @@ FROM python:3.13-slim-bullseye AS builder
 # Build-time optimizations
 ARG PIP_NO_CACHE_DIR=1
 ARG PIP_DISABLE_PIP_VERSION_CHECK=1
-ARG PIP_NO_COMPILE=1
 ARG PYTHONDONTWRITEBYTECODE=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -18,8 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /build
 COPY requirements/ requirements/
 
-# Build wheels without compilation for smaller size
-RUN pip wheel --no-cache-dir --wheel-dir=/wheels --no-compile \
+# Build wheels (remove --no-compile as it's not valid for pip wheel)
+RUN pip wheel --no-cache-dir --wheel-dir=/wheels \
     -r requirements/base.txt \
     -r requirements/production.txt
 
@@ -58,7 +57,7 @@ RUN apt-get update && \
     /usr/share/doc/* /usr/share/man/* /usr/share/info/* \
     /usr/share/lintian/* /usr/share/linda/*
 
-# Install Python packages with optimization
+# Install Python packages with --no-compile flag here where it's valid
 COPY --from=builder /wheels /wheels
 RUN pip install --no-cache-dir --no-compile --no-index \
     --find-links=/wheels /wheels/* && \
