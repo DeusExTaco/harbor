@@ -1,5 +1,6 @@
 ---
-# deploy/docker/docker-compose.prod.yml
+# docker-compose.prod.yml
+# Harbor Container Updater - Production deployment with enhanced security
 
 services:
   # Docker socket proxy
@@ -33,7 +34,7 @@ services:
 
   harbor:
     build:
-      context: ../..
+      context: .  # Build from project root
       dockerfile: deploy/docker/Dockerfile
       secrets:
       - pip_index_url
@@ -47,7 +48,7 @@ services:
     security_opt:
     - no-new-privileges:true
     - apparmor:harbor-container    # Custom profile
-    - seccomp:./deploy/security/seccomp-harbor.json
+    - seccomp:deploy/security/seccomp-harbor.json
     cap_drop:
     - ALL
     read_only: true

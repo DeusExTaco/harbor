@@ -1,6 +1,6 @@
 ---
+# docker-compose.dev.yml
 # Harbor Container Updater - Development Docker Compose
-# Located: deploy/docker/docker-compose.dev.yml
 # Complete development environment with hot reload, debugging, and services
 
 services:
@@ -9,7 +9,7 @@ services:
   # =============================================================================
   harbor-dev:
     build:
-      context: ../.. # Build from project root
+      context: .  # Build from project root
       dockerfile: deploy/docker/Dockerfile.dev
       args:
       - DEV_MODE=true
@@ -20,7 +20,7 @@ services:
     - 5678:5678     # Debug port (debugpy)
     volumes:
       # Source code mounting for hot reload (from project root)
-    - ../..:/app
+    - .:/app
     - /app/__pycache__   # Exclude pycache
     - /app/.pytest_cache   # Exclude pytest cache
 
@@ -94,7 +94,7 @@ services:
     - 6379:6379
     volumes:
     - redis_dev_data:/data
-    - ../../config/redis-dev.conf:/usr/local/etc/redis/redis.conf
+    - ./config/redis-dev.conf:/usr/local/etc/redis/redis.conf
     command: redis-server /usr/local/etc/redis/redis.conf
     environment:
     - REDIS_PASSWORD=dev_password_123   # pragma: allowlist secret
@@ -121,7 +121,7 @@ services:
     - 5432:5432
     volumes:
     - postgres_dev_data:/var/lib/postgresql/data
-    - ../../scripts/init-postgres-dev.sql:/docker-entrypoint-initdb.d/init.sql
+    - ./scripts/init-postgres-dev.sql:/docker-entrypoint-initdb.d/init.sql
     environment:
     - POSTGRES_DB=harbor_dev
     - POSTGRES_USER=harbor_dev
@@ -152,7 +152,7 @@ services:
     - 5000:5000
     volumes:
     - registry_dev_data:/var/lib/registry
-    - ../../config/registry-dev.yml:/etc/docker/registry/config.yml
+    - ./config/registry-dev.yml:/etc/docker/registry/config.yml
     environment:
     - REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY=/var/lib/registry
     - REGISTRY_HTTP_ADDR=0.0.0.0:5000
@@ -175,7 +175,7 @@ services:
     ports:
     - 9090:9090
     volumes:
-    - ../../config/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    - ./config/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
     - prometheus_dev_data:/prometheus
     command:
     - --config.file=/etc/prometheus/prometheus.yml
@@ -204,7 +204,7 @@ services:
     - 3000:3000
     volumes:
     - grafana_dev_data:/var/lib/grafana
-    - ../../config/monitoring/grafana:/etc/grafana/provisioning
+    - ./config/monitoring/grafana:/etc/grafana/provisioning
     environment:
     - GF_SECURITY_ADMIN_PASSWORD=dev_password_123   # pragma: allowlist secret
     - GF_USERS_ALLOW_SIGN_UP=false
@@ -249,7 +249,7 @@ services:
     ports:
     - 8081:80
     volumes:
-    - ../../tests/fixtures/nginx.conf:/etc/nginx/nginx.conf:ro
+    - ./tests/fixtures/nginx.conf:/etc/nginx/nginx.conf:ro
     labels:
     - harbor.enable=true
     - harbor.policy.auto-update=true

@@ -64,6 +64,31 @@ RUN mkdir -p /app/data /app/logs /app/config /app/.cache && \
     chmod -R u=rwX,go=rX /app && \
     chown -R 1000:1000 /app
 
+# Create entrypoint script using echo commands
+# hadolint ignore=SC2016
+RUN echo '#!/bin/sh' > /app/docker-entrypoint-dev.sh && \
+    echo 'set -e' >> /app/docker-entrypoint-dev.sh && \
+    echo '' >> /app/docker-entrypoint-dev.sh && \
+    echo '# If first argument is python or starts with -, pass all arguments to python' >> /app/docker-entrypoint-dev.sh && \
+    echo 'if [ "$1" = "python" ] || [ "${1#-}" != "$1" ]; then' >> /app/docker-entrypoint-dev.sh && \
+    echo '    exec "$@"' >> /app/docker-entrypoint-dev.sh && \
+    echo 'fi' >> /app/docker-entrypoint-dev.sh && \
+    echo '' >> /app/docker-entrypoint-dev.sh && \
+    echo '# If running tests (when -c is passed), execute with python' >> /app/docker-entrypoint-dev.sh && \
+    echo 'if [ "$1" = "-c" ]; then' >> /app/docker-entrypoint-dev.sh && \
+    echo '    exec python "$@"' >> /app/docker-entrypoint-dev.sh && \
+    echo 'fi' >> /app/docker-entrypoint-dev.sh && \
+    echo '' >> /app/docker-entrypoint-dev.sh && \
+    echo '# If running with custom uvicorn args' >> /app/docker-entrypoint-dev.sh && \
+    echo 'if [ "$1" = "uvicorn" ]; then' >> /app/docker-entrypoint-dev.sh && \
+    echo '    exec python -m "$@"' >> /app/docker-entrypoint-dev.sh && \
+    echo 'fi' >> /app/docker-entrypoint-dev.sh && \
+    echo '' >> /app/docker-entrypoint-dev.sh && \
+    echo '# Default: run the Harbor application with uvicorn in development mode with reload' >> /app/docker-entrypoint-dev.sh && \
+    echo 'exec python -m uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8080 --reload' >> /app/docker-entrypoint-dev.sh && \
+    chmod 755 /app/docker-entrypoint-dev.sh && \
+    chown 1000:1000 /app/docker-entrypoint-dev.sh
+
 # Switch to non-root user
 USER 1000:1000
 
@@ -82,6 +107,5 @@ EXPOSE 8080 5678
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD ["python", "scripts/health_check.py"]
 
-# Development with hot reload
-ENTRYPOINT ["python", "-m", "uvicorn", "app.main:create_app"]
-CMD ["--factory", "--host", "0.0.0.0", "--port", "8080", "--reload"]
+# Use shell script as entrypoint to handle different execution modes
+ENTRYPOINT ["/app/docker-entrypoint-dev.sh"]
