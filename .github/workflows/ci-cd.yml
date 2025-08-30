@@ -4,8 +4,18 @@ on:
   push:
     branches: [main, develop]
     tags: ['v*']
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'examples/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
   pull_request:
     branches: [main, develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'examples/**'
 
 # Comprehensive permissions for all workflow operations
 permissions:
@@ -24,6 +34,42 @@ env:
   REGISTRY_IMAGE_GHCR: ghcr.io/deusextaco/harbor
 
 jobs:
+
+  pre-flight-check:
+    name: Pre-flight Check
+    runs-on: ubuntu-latest
+    outputs:
+      should-continue: ${{ steps.check.outputs.continue }}
+      skip-reason: ${{ steps.check.outputs.reason }}
+
+    steps:
+      - name: Check skip conditions
+        id: check
+        run: |
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+
+          # Check for global skip
+          if [[ "$COMMIT_MSG" == *"[skip ci]"* ]] || [[ "$COMMIT_MSG" == *"[ci skip]"* ]]; then
+            echo "continue=false" >> $GITHUB_OUTPUT
+            echo "reason=skip-ci-flag" >> $GITHUB_OUTPUT
+            echo "::notice::CI pipeline skipped due to [skip ci] flag"
+          # Check for docs-only changes (if last commit only touched docs)
+          elif [[ "$COMMIT_MSG" == *"docs:"* ]] && [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "continue=true" >> $GITHUB_OUTPUT  # Still run, but note it
+            echo "reason=docs-change" >> $GITHUB_OUTPUT
+            echo "::notice::Documentation change detected"
+          else
+            echo "continue=true" >> $GITHUB_OUTPUT
+            echo "reason=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate skip summary
+        if: steps.check.outputs.continue == 'false'
+        run: |
+          echo "## Pipeline Skipped" >> $GITHUB_STEP_SUMMARY
+          echo "Reason: ${{ steps.check.outputs.reason }}" >> $GITHUB_STEP_SUMMARY
+          echo "Commit: ${{ github.event.head_commit.message }}" >> $GITHUB_STEP_SUMMARY
+
   # =============================================================================
   # Stage 1: Parallel Static Analysis & Fast Checks
   # =============================================================================
@@ -31,6 +77,8 @@ jobs:
   # Fast code quality checks (runs immediately)
   code-quality:
     name: Code Quality & Linting
+    needs: [ pre-flight-check ]  # ADD THIS
+    if: needs.pre-flight-check.outputs.should-continue == 'true'
     uses: ./.github/workflows/test.yml
     secrets: inherit # pragma: allowlist secret
     with:
@@ -39,12 +87,16 @@ jobs:
   # Static security analysis (runs in parallel with quality)
   static-security:
     name: Static Security Analysis
+    needs: [ pre-flight-check ]
+    if: needs.pre-flight-check.outputs.should-continue == 'true'
     uses: ./.github/workflows/codeql.yml
     secrets: inherit # pragma: allowlist secret
 
   # Dependency scanning (runs in parallel)
   dependency-security:
     name: Dependency Security
+    needs: [ pre-flight-check ]
+    if: needs.pre-flight-check.outputs.should-continue == 'true'
     uses: ./.github/workflows/dependency-review.yml
     secrets: inherit # pragma: allowlist secret
 
@@ -54,7 +106,10 @@ jobs:
 
   test-suite:
     name: Full Test Suite
-    needs: [code-quality]  # Wait for linting to pass
+    needs: [ pre-flight-check, code-quality ]
+    if: |
+      needs.pre-flight-check.outputs.should-continue == 'true' &&
+      needs.code-quality.result == 'success'  # MODIFY - add first condition
     uses: ./.github/workflows/test.yml
     secrets: inherit # pragma: allowlist secret
     with:
@@ -67,9 +122,10 @@ jobs:
   build-config:
     name: Build Configuration
     runs-on: ubuntu-latest
-    needs: [test-suite, static-security, dependency-security]
+    needs: [ pre-flight-check, test-suite, static-security, dependency-security ]
     if: |
       always() &&
+      needs.pre-flight-check.outputs.should-continue == 'true' &&  # ADD THIS LINE
       needs.test-suite.outputs.tests-passed == 'true' &&
       (needs.static-security.result == 'success' || needs.static-security.result == 'skipped') &&
       (needs.dependency-security.result == 'success' || needs.dependency-security.result == 'skipped')
@@ -82,6 +138,7 @@ jobs:
       version: ${{ steps.config.outputs.version }}
       milestone: ${{ steps.config.outputs.milestone }}
       is-prerelease: ${{ steps.config.outputs.is-prerelease }}
+      skip-reason: ${{ steps.config.outputs.skip-reason }}
 
     steps:
       - name: Checkout Repository
@@ -90,6 +147,9 @@ jobs:
       - name: Configure build strategy
         id: config
         run: |
+          # Initialize skip reason
+          SKIP_REASON=""
+
           # Extract version from app/__init__.py (source of truth)
           if [ -f "app/__init__.py" ]; then
             VERSION=$(python -c "
@@ -116,10 +176,25 @@ jobs:
             MILESTONE="${{ env.HARBOR_MILESTONE }}"
           fi
 
+          # Check if tests failed (but allow override for tags and schedules)
+          if [[ "${{ needs.test-suite.outputs.tests-passed }}" != "true" ]]; then
+            if [[ "${{ github.event_name }}" == "schedule" ]]; then
+              echo "⚠️ Tests failed but proceeding due to scheduled build"
+            elif [[ "${{ github.ref_type }}" == "tag" ]]; then
+              echo "⚠️ Tests failed but proceeding due to tag release"
+            else
+              echo "should-build=false" >> $GITHUB_OUTPUT
+              echo "skip-reason=tests-failed" >> $GITHUB_OUTPUT
+              echo "❌ Skipping build due to test failures"
+              exit 0
+            fi
+          fi
+
           # Determine if this is a release (tag push)
           if [[ "${{ github.ref_type }}" == "tag" && "${{ github.ref }}" == refs/tags/v* ]]; then
             echo "is-release=true" >> $GITHUB_OUTPUT
             echo "should-build=true" >> $GITHUB_OUTPUT
+            echo "skip-reason=" >> $GITHUB_OUTPUT
 
             # Use version from tag
             VERSION="${{ github.ref_name }}"  # e.g., v0.1.0-alpha.3
@@ -143,6 +218,7 @@ jobs:
           elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             echo "is-release=false" >> $GITHUB_OUTPUT
             echo "should-build=true" >> $GITHUB_OUTPUT
+            echo "skip-reason=" >> $GITHUB_OUTPUT
             echo "version=$VERSION" >> $GITHUB_OUTPUT
             echo "milestone=$MILESTONE" >> $GITHUB_OUTPUT
             echo "is-prerelease=false" >> $GITHUB_OUTPUT
@@ -156,6 +232,7 @@ jobs:
           elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
             echo "is-release=false" >> $GITHUB_OUTPUT
             echo "should-build=true" >> $GITHUB_OUTPUT
+            echo "skip-reason=" >> $GITHUB_OUTPUT
             echo "version=$VERSION" >> $GITHUB_OUTPUT
             echo "milestone=$MILESTONE" >> $GITHUB_OUTPUT
             echo "is-prerelease=true" >> $GITHUB_OUTPUT
@@ -166,14 +243,53 @@ jobs:
 
             echo "🔧 DEVELOP BRANCH BUILD"
 
-          else
+          elif [[ "${{ github.event_name }}" == "schedule" ]]; then
+            # Scheduled builds should build from main/develop
             echo "is-release=false" >> $GITHUB_OUTPUT
-            echo "should-build=false" >> $GITHUB_OUTPUT
+            echo "should-build=true" >> $GITHUB_OUTPUT
+            echo "skip-reason=" >> $GITHUB_OUTPUT
             echo "version=$VERSION" >> $GITHUB_OUTPUT
             echo "milestone=$MILESTONE" >> $GITHUB_OUTPUT
             echo "is-prerelease=false" >> $GITHUB_OUTPUT
 
-            echo "📝 PULL REQUEST - Build skipped"
+            # Set nightly tags
+            echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:nightly" >> $GITHUB_OUTPUT
+            echo "ghcr-tags=${{ env.REGISTRY_IMAGE_GHCR }}:nightly" >> $GITHUB_OUTPUT
+
+            echo "🌙 SCHEDULED/NIGHTLY BUILD"
+
+          else
+            echo "is-release=false" >> $GITHUB_OUTPUT
+            echo "should-build=false" >> $GITHUB_OUTPUT
+            echo "skip-reason=pull-request" >> $GITHUB_OUTPUT
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "milestone=$MILESTONE" >> $GITHUB_OUTPUT
+            echo "is-prerelease=false" >> $GITHUB_OUTPUT
+
+            echo "🔍 PULL REQUEST - Build skipped"
+          fi
+
+      - name: Output build decision summary
+        if: always()
+        run: |
+          echo "## 🎯 Build Configuration Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Should Build | ${{ steps.config.outputs.should-build }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Is Release | ${{ steps.config.outputs.is-release }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ steps.config.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Milestone | ${{ steps.config.outputs.milestone }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Skip Reason | ${{ steps.config.outputs.skip-reason || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ steps.config.outputs.should-build }}" == "true" ]]; then
+            echo "### 🏷️ Docker Tags" >> $GITHUB_STEP_SUMMARY
+            echo "- Docker Hub: ${{ steps.config.outputs.docker-tags }}" >> $GITHUB_STEP_SUMMARY
+            echo "- GHCR: ${{ steps.config.outputs.ghcr-tags }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ⏭️ Build Skipped" >> $GITHUB_STEP_SUMMARY
+            echo "Reason: ${{ steps.config.outputs.skip-reason }}" >> $GITHUB_STEP_SUMMARY
           fi
 
   # =============================================================================
@@ -182,8 +298,10 @@ jobs:
 
   docker-build:
     name: Docker Build & Publish
-    needs: [build-config]
-    if: needs.build-config.outputs.should-build == 'true'
+    needs: [ pre-flight-check, build-config ]
+    if: |
+      needs.pre-flight-check.outputs.should-continue == 'true' &&  # ADD THIS LINE
+      needs.build-config.outputs.should-build == 'true'
     uses: ./.github/workflows/docker-build.yml
     secrets: inherit # pragma: allowlist secret
     with:
@@ -195,9 +313,10 @@ jobs:
 
   container-security:
     name: Container Security Scan
-    needs: [build-config, docker-build]
+    needs: [ pre-flight-check, build-config, docker-build ]
     if: |
       always() &&
+      needs.pre-flight-check.outputs.should-continue == 'true' &&  # ADD THIS LINE
       needs.docker-build.outputs.build-successful == 'true'
     uses: ./.github/workflows/security.yml
     secrets: inherit # pragma: allowlist secret
@@ -213,9 +332,10 @@ jobs:
   registry-retention:
     name: Registry Cleanup & Retention
     runs-on: ubuntu-latest
-    needs: [ docker-build, container-security ]
+    needs: [ pre-flight-check, docker-build, container-security ]
     if: |
       always() &&
+      needs.pre-flight-check.outputs.should-continue == 'true' &&  # ADD THIS LINE
       needs.docker-build.outputs.build-successful == 'true' &&
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
 
@@ -368,9 +488,10 @@ jobs:
 
   create-github-release:
     name: Create GitHub Release
-    needs: [build-config, docker-build, container-security]
+    needs: [ pre-flight-check, build-config, docker-build, container-security ]
     if: |
       always() &&
+      needs.pre-flight-check.outputs.should-continue == 'true' &&  # ADD THIS LINE
       needs.build-config.outputs.is-release == 'true' &&
       needs.docker-build.outputs.build-successful == 'true' &&
       (needs.container-security.result == 'success' || needs.container-security.result == 'skipped')
@@ -442,7 +563,7 @@ jobs:
   pipeline-summary:
     name: Pipeline Summary
     runs-on: ubuntu-latest
-    needs: [code-quality, static-security, dependency-security, test-suite, build-config, docker-build, container-security, create-github-release]
+    needs: [ pre-flight-check, code-quality, static-security, dependency-security, test-suite, build-config, docker-build, container-security, create-github-release ]  # MODIFY - add pre-flight-check
     if: always()
 
     steps:
@@ -593,3 +714,78 @@ jobs:
             echo "❌ Harbor CI/CD Pipeline failed!"
             exit 1
           fi
+  # =============================================================================
+  # Stage 8: PR Comment Update (ADD THIS NEW SECTION)
+  # =============================================================================
+
+  pr-pipeline-comment:
+    name: Update PR Pipeline Summary
+    needs: [ pre-flight-check, code-quality, static-security, dependency-security, test-suite, build-config, docker-build, container-security, create-github-release, pipeline-summary ]  # MODIFY - add pre-flight-check
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.number != null &&
+      always()  # Keep as always() to update PR even when skipped
+    runs-on: ubuntu-latest
+
+    permissions:
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Generate PR summary
+        run: |
+          cat > pr-summary.md << 'EOF'
+          <!-- harbor-pr-comment:pipeline-summary -->
+          ## 🚀 Harbor CI/CD Pipeline Results
+
+          ### Pipeline Status
+
+          | Stage | Status |
+          |-------|--------|
+          | 🔍 Code Quality | ${{ needs.code-quality.result }} |
+          | 🔒 Static Security | ${{ needs.static-security.result }} |
+          | 📦 Dependency Security | ${{ needs.dependency-security.result }} |
+          | 🧪 Test Suite | ${{ needs.test-suite.result }} |
+          | 🐳 Docker Build | ${{ needs.docker-build.result }} |
+          | 🛡️ Container Security | ${{ needs.container-security.result }} |
+
+          ### Summary
+          EOF
+
+          # Determine overall status
+          if [[ "${{ needs.code-quality.result }}" == "success" && \
+                "${{ needs.test-suite.result }}" == "success" ]]; then
+            echo "✅ **All critical checks passed!** Ready for review and merge." >> pr-summary.md
+          else
+            echo "❌ **Some checks failed.** Please review the errors above." >> pr-summary.md
+          fi
+
+          echo "" >> pr-summary.md
+          echo "### Details" >> pr-summary.md
+          echo "- **Branch**: \`${{ github.head_ref }}\` → \`${{ github.base_ref }}\`" >> pr-summary.md
+          echo "- **Commit**: \`${{ github.event.pull_request.head.sha }}\`" >> pr-summary.md
+          echo "- **Version**: ${{ needs.build-config.outputs.version || 'N/A' }}" >> pr-summary.md
+          echo "- **Milestone**: ${{ needs.build-config.outputs.milestone || 'M0' }}" >> pr-summary.md
+          echo "" >> pr-summary.md
+          echo "### Quick Links" >> pr-summary.md
+          echo "- [View Full Pipeline](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> pr-summary.md
+          echo "- [View Artifacts](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts)" >> pr-summary.md
+          echo "" >> pr-summary.md
+          echo "---" >> pr-summary.md
+          echo "_Updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')_" >> pr-summary.md
+
+      - name: Find existing comment
+        uses: peter-evans/find-comment@v2
+        id: find-comment
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '<!-- harbor-pr-comment:pipeline-summary -->'
+
+      - name: Update PR comment
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: pr-summary.md
+          edit-mode: replace

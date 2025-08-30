@@ -1,0 +1,92 @@
+# .github/workflows/pr-comment.yml
+name: PR Comment Manager
+
+on:
+  workflow_call:
+    inputs:
+      comment-id:
+        description: 'Unique identifier for this comment type'
+        required: true
+        type: string
+      title:
+        description: 'Comment title/header'
+        required: true
+        type: string
+      body:
+        description: 'Comment body content'
+        required: true
+        type: string
+      body-file:
+        description: 'Path to file containing comment body (alternative to body)'
+        required: false
+        type: string
+      pr-number:
+        description: 'PR number (auto-detected if not provided)'
+        required: false
+        type: number
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  manage-comment:
+    name: Update PR Comment
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || inputs.pr-number
+
+    steps:
+      - name: Determine PR number
+        id: pr-info
+        run: |
+          if [ -n "${{ inputs.pr-number }}" ]; then
+            echo "pr-number=${{ inputs.pr-number }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "pr-number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          else
+            echo "No PR number available"
+            exit 1
+          fi
+
+      - name: Create comment marker
+        id: marker
+        run: |
+          # Create a unique, hidden marker for this comment type
+          MARKER="<!-- harbor-pr-comment:${{ inputs.comment-id }} -->"
+          echo "marker=$MARKER" >> $GITHUB_OUTPUT
+
+      - name: Prepare comment body
+        id: prepare-body
+        run: |
+          # Add marker and title to the comment
+          echo "${{ steps.marker.outputs.marker }}" > comment-body.md
+          echo "## ${{ inputs.title }}" >> comment-body.md
+          echo "" >> comment-body.md
+
+          # Add the actual content
+          if [ -n "${{ inputs.body-file }}" ]; then
+            cat "${{ inputs.body-file }}" >> comment-body.md
+          else
+            echo "${{ inputs.body }}" >> comment-body.md
+          fi
+
+          # Add footer
+          echo "" >> comment-body.md
+          echo "---" >> comment-body.md
+          echo "_Last updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')_" >> comment-body.md
+
+      - name: Find existing comment
+        uses: peter-evans/find-comment@v2
+        id: find-comment
+        with:
+          issue-number: ${{ steps.pr-info.outputs.pr-number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: ${{ steps.marker.outputs.marker }}
+
+      - name: Create or update comment
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ steps.pr-info.outputs.pr-number }}
+          body-path: comment-body.md
+          edit-mode: replace

@@ -303,7 +303,7 @@ jobs:
           with open('CHANGELOG.md', 'w') as f:
               f.write(content)
 
-          print(f"✅ Updated CHANGELOG.md with version {new_version}")
+          print(f"Updated CHANGELOG.md with version {new_version}")
           PYTHON_SCRIPT
 
           python update_changelog.py "$NEW_VERSION" "$CURRENT_DATE"
@@ -339,18 +339,18 @@ jobs:
           print(f'CHANGELOG.md has version {NEW_VERSION}: {changelog_has_version}')
 
           if app_version != proj_version:
-              print('❌ Version mismatch between app/__init__.py and pyproject.toml!')
+              print('Version mismatch between app/__init__.py and pyproject.toml!')
               sys.exit(1)
 
           if app_version != '${NEW_VERSION}':
-              print(f'❌ Version not updated correctly. Expected: ${NEW_VERSION}, Got: {app_version}')
+              print(f'Version not updated correctly. Expected: ${NEW_VERSION}, Got: {app_version}')
               sys.exit(1)
 
           if not changelog_has_version:
-              print(f'❌ CHANGELOG.md was not updated with version ${NEW_VERSION}')
+              print(f'CHANGELOG.md was not updated with version ${NEW_VERSION}')
               sys.exit(1)
 
-          print('✅ All files are consistently updated')
+          print('All files are consistently updated')
           "
 
       - name: Commit version bump and changelog
@@ -386,30 +386,70 @@ jobs:
           # Push the changes
           git push
 
+      - name: Create and push version tag
+        run: |
+          NEW_VERSION="${{ steps.new-version.outputs.new }}"
+
+          # Configure git for tagging
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          # Create annotated tag with detailed message
+          git tag -a "v$NEW_VERSION" -m "Version $NEW_VERSION
+
+          Automated version release from develop branch
+
+          Summary of changes:
+          - Features/Additions: ${{ steps.get-commits.outputs.feature_count }}
+          - Bug Fixes: ${{ steps.get-commits.outputs.fix_count }}
+          - Updates/Changes: ${{ steps.get-commits.outputs.update_count }}
+
+          Previous version: ${{ steps.current-version.outputs.current }}
+          Base version: ${{ steps.new-version.outputs.base }}
+          Alpha iteration: ${{ steps.new-version.outputs.alpha }}
+
+          This is an alpha pre-release version.
+
+          Docker images available:
+          - ghcr.io/deusextaco/harbor:$NEW_VERSION
+          - dextaco/harbor:$NEW_VERSION"
+
+          # Push the tag to trigger release workflow
+          git push origin "v$NEW_VERSION"
+
+          echo "Tag v$NEW_VERSION created and pushed successfully"
+          echo "This will trigger the CI/CD pipeline to create a GitHub release"
+
       - name: Create version bump summary
         run: |
-          echo "# 🔄 Version Bump & Changelog Update" >> $GITHUB_STEP_SUMMARY
+          echo "# Version Bump & Changelog Update" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📊 Version Details" >> $GITHUB_STEP_SUMMARY
+          echo "## Version Details" >> $GITHUB_STEP_SUMMARY
           echo "- **Previous Version**: ${{ steps.current-version.outputs.current }}" >> $GITHUB_STEP_SUMMARY
           echo "- **New Version**: ${{ steps.new-version.outputs.new }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Base Version**: ${{ steps.new-version.outputs.base }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Alpha Number**: ${{ steps.new-version.outputs.alpha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Git Tag**: v${{ steps.new-version.outputs.new }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📈 Change Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Change Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **Features/Additions**: ${{ steps.get-commits.outputs.feature_count }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Bug Fixes**: ${{ steps.get-commits.outputs.fix_count }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Updates/Changes**: ${{ steps.get-commits.outputs.update_count }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📝 Files Updated" >> $GITHUB_STEP_SUMMARY
-          echo "- \`app/__init__.py\` ✅" >> $GITHUB_STEP_SUMMARY
-          echo "- \`pyproject.toml\` ✅" >> $GITHUB_STEP_SUMMARY
-          echo "- \`CHANGELOG.md\` ✅" >> $GITHUB_STEP_SUMMARY
+          echo "## Files Updated" >> $GITHUB_STEP_SUMMARY
+          echo "- \`app/__init__.py\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`pyproject.toml\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`CHANGELOG.md\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 🎯 Milestone" >> $GITHUB_STEP_SUMMARY
+          echo "## Release Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag Created**: v${{ steps.new-version.outputs.new }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release Type**: Alpha Pre-release" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release Workflow**: Will trigger automatically" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Milestone" >> $GITHUB_STEP_SUMMARY
           echo "- **Current**: M0 (Foundation)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 🔗 Triggered By" >> $GITHUB_STEP_SUMMARY
+          echo "## Triggered By" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Message**: ${{ github.event.head_commit.message }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Author**: ${{ github.event.head_commit.author.name }}" >> $GITHUB_STEP_SUMMARY

@@ -1,3 +1,4 @@
+# .github/workflows/docker-build.yml
 name: Docker Build & Publish
 
 on:
@@ -15,7 +16,6 @@ on:
       build-successful:
         description: "Whether build was successful"
         value: ${{ jobs.summary.outputs.build-successful }}
-  # REMOVED independent push triggers - now only callable from main pipeline
 
 permissions:
   contents: read
@@ -51,7 +51,7 @@ jobs:
           # Determine if we should build
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "should-build=false" >> $GITHUB_OUTPUT
-            echo "📄 Pull request - skipping build"
+            echo "ðŸ"„ Pull request - skipping build"
             exit 0
           else
             echo "should-build=true" >> $GITHUB_OUTPUT
@@ -66,14 +66,14 @@ jobs:
               match = re.search(r'__version__ = [\"']([^\"']+)[\"']', content)
               if match:
                   print(match.group(1))
-          " || echo "0.1.0-alpha.3")
+          " || (echo 'ERROR: Could not extract version from app/__init__.py' && exit 1))
           else
             # Fallback to pyproject.toml
             VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
           fi
 
           echo "harbor-version=$VERSION" >> $GITHUB_OUTPUT
-          echo "📦 Detected version: $VERSION"
+          echo "ðŸ"¦ Detected version: $VERSION"
 
           # Determine tags and dockerfile based on ref with explicit validation
           if [ "${{ github.ref_type }}" = "tag" ]; then
@@ -82,26 +82,26 @@ jobs:
             echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:$TAG_VERSION,${{ env.REGISTRY_IMAGE_DOCKERHUB }}:latest" >> $GITHUB_OUTPUT
             echo "ghcr-tags=${{ env.REGISTRY_IMAGE_GHCR }}:$TAG_VERSION,${{ env.REGISTRY_IMAGE_GHCR }}:latest" >> $GITHUB_OUTPUT
             echo "dockerfile=deploy/docker/Dockerfile" >> $GITHUB_OUTPUT
-            echo "🏷️ Tag release - using production Dockerfile with version tags: $TAG_VERSION, latest"
+            echo "ðŸ·ï¸ Tag release - using production Dockerfile with version tags: $TAG_VERSION, latest"
           elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
             # Main branch - production build
             echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:latest,${{ env.REGISTRY_IMAGE_DOCKERHUB }}:$VERSION" >> $GITHUB_OUTPUT
             echo "ghcr-tags=${{ env.REGISTRY_IMAGE_GHCR }}:latest,${{ env.REGISTRY_IMAGE_GHCR }}:$VERSION" >> $GITHUB_OUTPUT
             echo "dockerfile=deploy/docker/Dockerfile" >> $GITHUB_OUTPUT
-            echo "📦 Main branch - using production Dockerfile with 'latest' and version tags"
+            echo "ðŸ"¦ Main branch - using production Dockerfile with 'latest' and version tags"
           elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
             # Develop branch - development build
             echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:develop,${{ env.REGISTRY_IMAGE_DOCKERHUB }}:$VERSION" >> $GITHUB_OUTPUT
             echo "ghcr-tags=${{ env.REGISTRY_IMAGE_GHCR }}:develop,${{ env.REGISTRY_IMAGE_GHCR }}:$VERSION" >> $GITHUB_OUTPUT
             echo "dockerfile=deploy/docker/Dockerfile.dev" >> $GITHUB_OUTPUT
-            echo "📦 Develop branch - using dev Dockerfile with 'develop' and version tags"
+            echo "ðŸ"¦ Develop branch - using dev Dockerfile with 'develop' and version tags"
           else
             # Feature branches - development build with branch name
             BRANCH_NAME=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
             echo "docker-tags=${{ env.REGISTRY_IMAGE_DOCKERHUB }}:$BRANCH_NAME,${{ env.REGISTRY_IMAGE_DOCKERHUB }}:$VERSION" >> $GITHUB_OUTPUT
             echo "ghcr-tags=${{ env.REGISTRY_IMAGE_GHCR }}:$BRANCH_NAME,${{ env.REGISTRY_IMAGE_GHCR }}:$VERSION" >> $GITHUB_OUTPUT
             echo "dockerfile=deploy/docker/Dockerfile.dev" >> $GITHUB_OUTPUT
-            echo "📦 Feature branch ($BRANCH_NAME) - using dev Dockerfile with branch tags"
+            echo "ðŸ"¦ Feature branch ($BRANCH_NAME) - using dev Dockerfile with branch tags"
           fi
 
   # =============================================================================
@@ -117,8 +117,75 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Check for skip build indicators
+        id: skip-check
+        run: |
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+
+          if [[ "$COMMIT_MSG" == *"[skip build]"* ]] || [[ "$COMMIT_MSG" == *"[skip docker]"* ]]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Skipping Docker build due to commit message flag"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Early exit if skipped
+        if: steps.skip-check.outputs.skip == 'true'
+        run: |
+          echo "Docker build skipped by request"
+          echo "::warning::Docker build was skipped due to [skip build] flag"
+          exit 0
+
       - name: Set up Docker Buildx
+        if: steps.skip-check.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v3
+
+      # Setup Docker cache with fallback mechanism
+      - name: Setup cache mount
+        id: cache-setup
+        run: |
+          echo "cache-type=gha" >> $GITHUB_OUTPUT  # Default to GitHub Actions cache
+          echo "Setting up Docker build cache configuration"
+
+      - name: Try local cache setup
+        id: local-cache
+        run: |
+          # Try to setup local cache directory
+          if mkdir -p /tmp/.buildx-cache; then
+            echo "cache-available=true" >> $GITHUB_OUTPUT
+            echo "âœ… Local cache directory created"
+          else
+            echo "cache-available=false" >> $GITHUB_OUTPUT
+            echo "âš ï¸ Could not create local cache directory"
+          fi
+        continue-on-error: true
+
+      - name: Restore cache from GitHub
+        id: cache-restore
+        if: steps.local-cache.outputs.cache-available == 'true'
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+        continue-on-error: true  # Don't fail if cache has issues
+
+      - name: Determine cache strategy
+        id: cache-strategy
+        run: |
+          # Determine which cache strategy to use based on what's available
+          if [ "${{ steps.cache-restore.outcome }}" = "success" ] && [ "${{ steps.local-cache.outputs.cache-available }}" = "true" ]; then
+            echo "âœ… Using local cache with GitHub Actions restore"
+            echo "cache-from=type=local,src=/tmp/.buildx-cache" >> $GITHUB_OUTPUT
+            echo "cache-to=type=local,dest=/tmp/.buildx-cache-new,mode=max" >> $GITHUB_OUTPUT
+            echo "cache-type=local" >> $GITHUB_OUTPUT
+          else
+            echo "âš ï¸ Local cache unavailable, using GitHub Actions cache (gha)"
+            echo "cache-from=type=gha" >> $GITHUB_OUTPUT
+            echo "cache-to=type=gha,mode=max" >> $GITHUB_OUTPUT
+            echo "cache-type=gha" >> $GITHUB_OUTPUT
+          fi
 
       # Login to registries with error handling
       - name: Log in to Docker Hub
@@ -140,11 +207,11 @@ jobs:
         run: |
           DOCKERFILE="${{ needs.build-config.outputs.dockerfile }}"
           if [ ! -f "$DOCKERFILE" ]; then
-            echo "❌ Dockerfile not found: $DOCKERFILE"
+            echo "âŒ Dockerfile not found: $DOCKERFILE"
             ls -la deploy/docker/
             exit 1
           fi
-          echo "✅ Using Dockerfile: $DOCKERFILE"
+          echo "âœ… Using Dockerfile: $DOCKERFILE"
 
       # Extract metadata using docker/metadata-action
       - name: Extract Docker metadata
@@ -165,7 +232,7 @@ jobs:
             harbor.milestone=M0
             harbor.deployment-profile=homelab
 
-      # Build and push to Docker Hub
+      # Build and push to Docker Hub with cache
       - name: Build and push to Docker Hub
         if: env.REGISTRY_IMAGE_DOCKERHUB != ''
         uses: docker/build-push-action@v5
@@ -176,10 +243,11 @@ jobs:
           push: true
           tags: ${{ needs.build-config.outputs.docker-tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: ${{ steps.cache-strategy.outputs.cache-from }}
+          cache-to: ${{ steps.cache-strategy.outputs.cache-to }}
+        continue-on-error: false  # Still fail on actual build errors
 
-      # Build and push to GHCR
+      # Build and push to GHCR with cache
       - name: Build and push to GHCR
         uses: docker/build-push-action@v5
         with:
@@ -189,19 +257,34 @@ jobs:
           push: true
           tags: ${{ needs.build-config.outputs.ghcr-tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: ${{ steps.cache-strategy.outputs.cache-from }}
+          cache-to: ${{ steps.cache-strategy.outputs.cache-to }}
+        continue-on-error: false  # Still fail on actual build errors
+
+      # Move cache if using local strategy
+      - name: Move cache (local strategy only)
+        if: steps.cache-strategy.outputs.cache-type == 'local' && always()
+        run: |
+          if [ -d /tmp/.buildx-cache-new ]; then
+            rm -rf /tmp/.buildx-cache
+            mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+            echo "âœ… Cache updated"
+          else
+            echo "âš ï¸ No new cache to move"
+          fi
+        continue-on-error: true
 
       # Output build information for debugging
       - name: Build information
         run: |
-          echo "🗿 Build completed successfully!"
-          echo "📦 Docker Hub tags: ${{ needs.build-config.outputs.docker-tags }}"
-          echo "📦 GHCR tags: ${{ needs.build-config.outputs.ghcr-tags }}"
-          echo "🐳 Dockerfile: ${{ needs.build-config.outputs.dockerfile }}"
-          echo "🌐 Platform: linux/amd64"
-          echo "📝 Git SHA: ${{ github.sha }}"
-          echo "🏷️ Version: ${{ needs.build-config.outputs.harbor-version }}"
+          echo "ðŸ—¿ Build completed successfully!"
+          echo "ðŸ"¦ Docker Hub tags: ${{ needs.build-config.outputs.docker-tags }}"
+          echo "ðŸ"¦ GHCR tags: ${{ needs.build-config.outputs.ghcr-tags }}"
+          echo "ðŸ³ Dockerfile: ${{ needs.build-config.outputs.dockerfile }}"
+          echo "ðŸŒ Platform: linux/amd64"
+          echo "ðŸ" Git SHA: ${{ github.sha }}"
+          echo "ðŸ·ï¸ Version: ${{ needs.build-config.outputs.harbor-version }}"
+          echo "ðŸ'¾ Cache strategy: ${{ steps.cache-strategy.outputs.cache-type }}"
 
   # =============================================================================
   # Image Testing & Validation
@@ -227,65 +310,65 @@ jobs:
             IMAGE_REF=$(echo "${{ needs.build-config.outputs.ghcr-tags }}" | cut -d',' -f1)
           fi
           echo "image-ref=$IMAGE_REF" >> $GITHUB_OUTPUT
-          echo "🧪 Testing image: $IMAGE_REF"
+          echo "ðŸ§ª Testing image: $IMAGE_REF"
 
       # Test basic image functionality
       - name: Test image basics
         run: |
-          echo "🧪 Testing ${{ matrix.registry }} image..."
+          echo "ðŸ§ª Testing ${{ matrix.registry }} image..."
           docker run --rm ${{ steps.image-ref.outputs.image-ref }} python -c "
           import sys
-          print('✅ ${{ matrix.registry }} image works!')
+          print('âœ… ${{ matrix.registry }} image works!')
           print(f'Python version: {sys.version}')
 
           try:
               import app
-              print(f'✅ Harbor version: {app.__version__}')
-              print(f'✅ Milestone: {app.__milestone__}')
-              print(f'✅ Status: {app.__status__}')
+              print(f'âœ… Harbor version: {app.__version__}')
+              print(f'âœ… Milestone: {app.__milestone__}')
+              print(f'âœ… Status: {app.__status__}')
           except ImportError as e:
-              print(f'❌ Harbor app import failed: {e}')
+              print(f'âŒ Harbor app import failed: {e}')
               exit(1)
           except AttributeError as e:
-              print(f'⚠️ Harbor app missing attributes: {e}')
+              print(f'âš ï¸ Harbor app missing attributes: {e}')
 
           try:
               import fastapi
-              print('✅ FastAPI available')
+              print('âœ… FastAPI available')
           except ImportError:
-              print('⚠️ FastAPI not available')
+              print('âš ï¸ FastAPI not available')
           "
 
       # Test container startup (quick test)
       - name: Test container startup
         run: |
-          echo "🧪 Testing container startup for ${{ matrix.registry }}..."
+          echo "ðŸ§ª Testing container startup for ${{ matrix.registry }}..."
 
           # Start container in background
           CONTAINER_NAME="harbor-test-${{ matrix.registry }}-${{ github.run_number }}"
           docker run -d --name $CONTAINER_NAME -p 8080:8080 ${{ steps.image-ref.outputs.image-ref }}
 
           # Wait for startup with timeout
-          echo "⏳ Waiting for application startup..."
+          echo "â³ Waiting for application startup..."
           for i in {1..30}; do
             if docker exec $CONTAINER_NAME python scripts/health_check.py 2>/dev/null; then
-              echo "✅ Container started successfully"
+              echo "âœ… Container started successfully"
               break
             fi
             sleep 2
             if [ $i -eq 30 ]; then
-              echo "❌ Container failed to start within 60 seconds"
+              echo "âŒ Container failed to start within 60 seconds"
               docker logs $CONTAINER_NAME
               exit 1
             fi
           done
 
           # Test health endpoint via HTTP
-          echo "🔍 Testing HTTP endpoints..."
+          echo "ðŸ" Testing HTTP endpoints..."
           if curl -f -s http://localhost:8080/healthz; then
-            echo "✅ Health endpoint working"
+            echo "âœ… Health endpoint working"
           else
-            echo "❌ Health endpoint failed"
+            echo "âŒ Health endpoint failed"
             docker logs $CONTAINER_NAME
             exit 1
           fi
@@ -314,10 +397,10 @@ jobs:
           # Determine if build was successful
           if [[ "${{ needs.build.result }}" == "success" && "${{ needs.test.result }}" == "success" ]]; then
             echo "build-successful=true" >> $GITHUB_OUTPUT
-            BUILD_STATUS="✅ SUCCESS"
+            BUILD_STATUS="âœ… SUCCESS"
           else
             echo "build-successful=false" >> $GITHUB_OUTPUT
-            BUILD_STATUS="❌ FAILED"
+            BUILD_STATUS="âŒ FAILED"
           fi
 
           # Set image tags output
@@ -330,33 +413,33 @@ jobs:
           fi
 
           # Generate summary using simple echo statements
-          echo "🎉 Harbor Docker Build Summary"
+          echo "ðŸŽ‰ Harbor Docker Build Summary"
           echo "============================"
           echo ""
-          echo "📋 Build Status: ${BUILD_STATUS}"
-          echo "🔧 Branch: ${{ github.ref_name }}"
-          echo "📦 Dockerfile: ${{ needs.build-config.outputs.dockerfile }}"
-          echo "🗿 Platform: linux/amd64"
-          echo "📝 Commit: ${{ github.sha }}"
-          echo "🏷️ Version: ${{ needs.build-config.outputs.harbor-version }}"
+          echo "ðŸ"‹ Build Status: ${BUILD_STATUS}"
+          echo "ðŸ"§ Branch: ${{ github.ref_name }}"
+          echo "ðŸ"¦ Dockerfile: ${{ needs.build-config.outputs.dockerfile }}"
+          echo "ðŸ—¿ Platform: linux/amd64"
+          echo "ðŸ" Commit: ${{ github.sha }}"
+          echo "ðŸ·ï¸ Version: ${{ needs.build-config.outputs.harbor-version }}"
           echo ""
 
           if [ "${{ needs.build-config.outputs.should-build }}" = "true" ]; then
-            echo "📦 Published Images:"
-            echo "• Docker Hub: ${{ needs.build-config.outputs.docker-tags }}"
-            echo "• GHCR: ${{ needs.build-config.outputs.ghcr-tags }}"
+            echo "ðŸ"¦ Published Images:"
+            echo "â€¢ Docker Hub: ${{ needs.build-config.outputs.docker-tags }}"
+            echo "â€¢ GHCR: ${{ needs.build-config.outputs.ghcr-tags }}"
             echo ""
-            echo "🔗 Repository Links:"
-            echo "• https://hub.docker.com/r/dextaco/harbor"
-            echo "• https://github.com/DeusExTaco/harbor/pkgs/container/harbor"
+            echo "ðŸ"— Repository Links:"
+            echo "â€¢ https://hub.docker.com/r/dextaco/harbor"
+            echo "â€¢ https://github.com/DeusExTaco/harbor/pkgs/container/harbor"
             echo ""
-            echo "📥 Quick Start:"
+            echo "ðŸ"¥ Quick Start:"
             MAIN_TAG=$(echo "${{ needs.build-config.outputs.ghcr-tags }}" | cut -d',' -f1)
             echo "docker run -d -p 8080:8080 $MAIN_TAG"
           else
-            echo "ℹ️ Build skipped for pull request"
+            echo "â„¹ï¸ Build skipped for pull request"
           fi
 
           echo ""
-          echo "🎯 M0 Milestone Status: Foundation Complete"
-          echo "📋 Next: M1 Container Discovery & Registry Integration"
+          echo "ðŸŽ¯ M0 Milestone Status: Foundation Complete"
+          echo "ðŸ"‹ Next: M1 Container Discovery & Registry Integration"
