@@ -117,6 +117,28 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Get version info
+        id: version
+        uses: ./.github/actions/get-version
+
+      - name: Determine build configuration
+        id: config
+        run: |
+          # Determine if we should build
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "should-build=false" >> $GITHUB_OUTPUT
+            echo "📄 Pull request - skipping build"
+            exit 0
+          else
+            echo "should-build=true" >> $GITHUB_OUTPUT
+          fi
+
+          # Use the extracted version
+          VERSION="${{ steps.version.outputs.version }}"
+
+          echo "harbor-version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Detected version: $VERSION"
+
       - name: Check for skip build indicators
         id: skip-check
         run: |

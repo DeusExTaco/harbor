@@ -144,37 +144,19 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Get version info
+        id: version
+        uses: ./.github/actions/get-version
+
       - name: Configure build strategy
         id: config
         run: |
           # Initialize skip reason
           SKIP_REASON=""
 
-          # Extract version from app/__init__.py (source of truth)
-          if [ -f "app/__init__.py" ]; then
-            VERSION=$(python -c "
-          import re
-          with open('app/__init__.py', 'r') as f:
-              content = f.read()
-              match = re.search(r'__version__ = [\"']([^\"']+)[\"']', content)
-              if match:
-                  print(match.group(1))
-          " || echo "${{ env.HARBOR_VERSION }}")
-
-            # Also extract milestone from app/__init__.py
-            MILESTONE=$(python -c "
-          import re
-          with open('app/__init__.py', 'r') as f:
-              content = f.read()
-              match = re.search(r'__milestone__ = [\"']([^\"']+)[\"']', content)
-              if match:
-                  print(match.group(1))
-          " || echo "${{ env.HARBOR_MILESTONE }}")
-          else
-            # Fallback to environment variables
-            VERSION="${{ env.HARBOR_VERSION }}"
-            MILESTONE="${{ env.HARBOR_MILESTONE }}"
-          fi
+          # Use the extracted version and milestone
+          VERSION="${{ steps.version.outputs.version }}"
+          MILESTONE="${{ steps.version.outputs.milestone }}"
 
           # Check if tests failed (but allow override for tags and schedules)
           if [[ "${{ needs.test-suite.outputs.tests-passed }}" != "true" ]]; then
