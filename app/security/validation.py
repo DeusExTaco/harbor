@@ -576,7 +576,7 @@ class ConfigurationValidator:
 def test_input_sanitization() -> None:
     """Test input sanitization functions."""
 
-    print("🧹 Testing Harbor Input Sanitization")
+    print("  Testing Harbor Input Sanitization")
     print("=" * 40)
 
     sanitizer = InputSanitizer()
@@ -609,11 +609,11 @@ def test_input_sanitization() -> None:
     for test in name_tests:
         try:
             sanitized = sanitizer.sanitize_container_name(test)
-            print(f"   ✅ '{test}' → '{sanitized}'")
+            print(f"     '{test}' -> '{sanitized}'")
         except SecurityValidationError as e:
-            print(f"   ❌ '{test}' → Error: {e.message}")
+            print(f"     '{test}' -> Error: {e.message}")
 
-    print("\n🧪 Input sanitization test complete")
+    print("\n  Input sanitization test complete")
 
 
 if __name__ == "__main__":

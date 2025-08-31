@@ -300,39 +300,39 @@ def print_validation_results(
     verbose: bool = False,
 ):
     """Print validation results in a formatted way."""
-    print(f"\n🔍 Configuration Validation Results for {profile.value.upper()} Profile")
+    print(f"\n  Configuration Validation Results for {profile.value.upper()} Profile")
     print("=" * 60)
 
     if is_valid:
-        print("✅ Configuration is VALID")
+        print("  Configuration is VALID")
     else:
-        print("❌ Configuration is INVALID")
+        print("  Configuration is INVALID")
 
     if errors:
-        print(f"\n🚫 Errors ({len(errors)}):")
+        print(f"\n  Errors ({len(errors)}):")
         for error in errors:
-            print(f"   ❌ {error}")
+            print(f"     {error}")
 
     if warnings:
-        print(f"\n⚠️  Warnings ({len(warnings)}):")
+        print(f"\n    Warnings ({len(warnings)}):")
         for warning in warnings:
-            print(f"   ⚠️  {warning}")
+            print(f"       {warning}")
 
     if not errors and not warnings:
-        print("\n✨ No issues found!")
+        print("\n  No issues found!")
 
     if verbose:
         # Show feature flags
         flags = get_feature_flags(profile)
         enabled_features = get_enabled_features(flags)
 
-        print("\n🎯 Enabled Features:")
+        print("\n  Enabled Features:")
         for category, features in enabled_features.items():
             if features:
                 print(f"   {category}:")
                 for feature, enabled in features.items():
                     if enabled:
-                        print(f"      ✓ {feature}")
+                        print(f"        {feature}")
 
 
 def validate_config_file(
@@ -348,7 +348,7 @@ def validate_config_file(
     Returns:
         bool: True if valid
     """
-    print(f"\n📄 Validating configuration file: {config_path}")
+    print(f"\n  Validating configuration file: {config_path}")
 
     try:
         # Load YAML configuration
@@ -360,7 +360,7 @@ def validate_config_file(
             try:
                 profile = DeploymentProfile(profile_str)
             except ValueError:
-                print(f"❌ Invalid profile in config: {profile_str}")
+                print(f"  Invalid profile in config: {profile_str}")
                 return False
 
         # Merge config to environment
@@ -375,7 +375,7 @@ def validate_config_file(
         return is_valid
 
     except Exception as e:
-        print(f"❌ Failed to validate config file: {e}")
+        print(f"  Failed to validate config file: {e}")
         return False
 
 
@@ -447,36 +447,36 @@ Examples:
 
     # Check system requirements
     if args.check_system:
-        print("\n🖥️  System Requirements Check")
+        print("\n    System Requirements Check")
         print("=" * 60)
 
         requirements = check_system_requirements()
 
-        status = "✅" if requirements["python_version_ok"] else "❌"
+        status = " " if requirements["python_version_ok"] else " "
         print(
             f"{status} Python version: {requirements['python_version']} (3.11+ required)"
         )
 
-        status = "✅" if requirements["docker_available"] else "❌"
+        status = " " if requirements["docker_available"] else " "
         print(
             f"{status} Docker: {'Available' if requirements['docker_available'] else 'Not found'}"
         )
 
         if "disk_space_gb" in requirements:
-            status = "✅" if requirements["disk_space_ok"] else "❌"
+            status = " " if requirements["disk_space_ok"] else " "
             print(f"{status} Disk space: {requirements['disk_space_gb']:.1f} GB free")
 
         print(f"\nPlatform: {requirements['platform']}")
 
         if requirements["checks_passed"]:
-            print("\n✅ All system requirements met!")
+            print("\n  All system requirements met!")
         else:
-            print("\n❌ Some requirements not met")
+            print("\n  Some requirements not met")
         return
 
     # Check environment variables
     if args.check_env:
-        print("\n🔧 Environment Configuration")
+        print("\n  Environment Configuration")
         print("=" * 60)
 
         env_info = validate_environment()
@@ -494,7 +494,7 @@ Examples:
                 print(f"  - {item}")
 
         if env_info["missing_required"]:
-            print("\n❌ Missing required:")
+            print("\n  Missing required:")
             for item in env_info["missing_required"]:
                 print(f"  - {item}")
 
@@ -518,7 +518,7 @@ Examples:
         try:
             profile = DeploymentProfile(profile_str)
         except ValueError:
-            print(f"❌ Invalid HARBOR_MODE: {profile_str}")
+            print(f"  Invalid HARBOR_MODE: {profile_str}")
             sys.exit(1)
 
     # Validate

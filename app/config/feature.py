@@ -406,7 +406,7 @@ def get_feature_report() -> str:
     ]
 
     for field in flags.core.__dataclass_fields__:
-        status = "✅" if getattr(flags.core, field) else "❌"
+        status = " " if getattr(flags.core, field) else " "
         lines.append(f"  {status} {field}")
 
     lines.extend(
@@ -419,16 +419,16 @@ def get_feature_report() -> str:
     for field in flags.future.__dataclass_fields__:
         enabled = getattr(flags.future, field)
         if enabled:
-            lines.append(f"  ✅ {field} [ENABLED FOR TESTING]")
+            lines.append(f"    {field} [ENABLED FOR TESTING]")
         else:
             # Add TODO milestone info
             if "mfa" in field or "oauth" in field:
-                lines.append(f"  ⏳ {field} (TODO: M7+)")
+                lines.append(f"    {field} (TODO: M7+)")
             elif "multi_user" in field or "rbac" in field:
-                lines.append(f"  ⏳ {field} (TODO: M8+)")
+                lines.append(f"    {field} (TODO: M8+)")
             elif "kubernetes" in field:
-                lines.append(f"  ⏳ {field} (TODO: M9+)")
+                lines.append(f"    {field} (TODO: M9+)")
             else:
-                lines.append(f"  ⏳ {field} (TODO: Future)")
+                lines.append(f"    {field} (TODO: Future)")
 
     return "\n".join(lines)

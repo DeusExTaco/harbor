@@ -12,7 +12,7 @@ from app.db.session import get_async_session
 
 async def reset_admin_password():
     """Reset admin password with confirmation."""
-    print("⚠️  This will reset the admin password")
+    print("    This will reset the admin password")
     confirm = input("Continue? (yes/no): ")
 
     if confirm.lower() != "yes":
@@ -25,7 +25,7 @@ async def reset_admin_password():
         admin = result.scalar_one_or_none()
 
         if not admin:
-            print("❌ Admin user not found")
+            print("  Admin user not found")
             return
 
         new_password = generate_password(16)
@@ -35,7 +35,7 @@ async def reset_admin_password():
 
         await session.commit()
 
-        print("✅ Admin password reset")
+        print("  Admin password reset")
         print(f"   New password: {new_password}")
 
 

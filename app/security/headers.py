@@ -436,7 +436,7 @@ def get_security_headers_for_profile(profile: DeploymentProfile) -> dict[str, st
 if __name__ == "__main__":
     """Security headers testing and utilities"""
 
-    print("🔐 Harbor Security Headers Middleware")
+    print("  Harbor Security Headers Middleware")
     print("=" * 40)
 
     # Import DeploymentProfile when running as main

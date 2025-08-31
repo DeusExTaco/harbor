@@ -37,6 +37,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # Import Harbor version info
 from app import __description__, __milestone__, __status__, __version__
+from app.utils.logging import setup_logging
 
 
 # Set up logger
@@ -146,9 +147,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
     Args:
         app: FastAPI application instance
     """
+    # [... keep all the lifespan code as is ...]
     # Startup tasks
-    print(f"🚢 Starting Harbor Container Updater v{__version__}")
-    print(f"🎯 Milestone: {__milestone__} ({__status__})")
+    print(f"  Starting Harbor Container Updater v{__version__}")
+    print(f"  Milestone: {__milestone__} ({__status__})")
 
     # Check runtime user
     if hasattr(os, "getuid"):
@@ -156,10 +158,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
         gid = os.getgid()
         is_root = uid == 0
         print(
-            f"👤 Running as: UID={uid}, GID={gid} ({'root' if is_root else 'non-root'})"
+            f"  Running as: UID={uid}, GID={gid} ({'root' if is_root else 'non-root'})"
         )
         if is_root:
-            print("⚠️  Warning: Running as root is not recommended for security")
+            print("    Warning: Running as root is not recommended for security")
 
     startup_success = True
     session_manager = None
@@ -172,24 +174,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
             settings = get_settings()
             config_summary = get_config_summary()
 
-            print(f"⚙️ Profile: {config_summary['deployment_profile']}")
-            print(f"🗃️ Database: {config_summary['database_type']}")
-            print(f"📊 Log Level: {config_summary['log_level']}")
+            print(f"   Profile: {config_summary['deployment_profile']}")
+            print(f"   Database: {config_summary['database_type']}")
+            print(f"  Log Level: {config_summary['log_level']}")
 
             # Validate runtime requirements
             errors = validate_runtime_requirements()
             if errors:
-                print("⚠️ Configuration issues detected:")
+                print("   Configuration issues detected:")
                 for error in errors:
                     print(f"  - {error}")
                 startup_success = False
             else:
-                print("✅ Configuration validated successfully")
+                print("  Configuration validated successfully")
 
             # Check data directory permissions
             data_dir = settings.data_dir
             success, message = check_directory_permissions(str(data_dir))
-            print(f"{'✅' if success else '❌'} {message}")
+            print(f"{' ' if success else ' '} {message}")
             if not success:
                 startup_success = False
 
@@ -197,26 +199,38 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
             log_dir = Path(data_dir).parent / "logs"
             if log_dir.parent.exists():
                 success, message = check_directory_permissions(str(log_dir))
-                print(f"{'✅' if success else '⚠️'} {message}")
+                print(f"{' ' if success else '  '} {message}")
 
         except Exception as e:
             logger.error(f"Configuration system error: {e}")
-            print(f"⚠️ Configuration system error: {e}")
+            print(f"   Configuration system error: {e}")
             startup_success = False
     else:
-        print("⚠️ Configuration system not available - using defaults")
+        print("   Configuration system not available - using defaults")
         startup_success = False
+
+    if CONFIG_AVAILABLE and settings:
+        # Configure enhanced logging with rotation
+        setup_logging(
+            level=settings.logging.log_level.value,
+            log_dir=settings.logs_dir,
+            json_format=settings.logging.log_format == "json",
+            enable_rotation=settings.logging.enable_file_logging,
+        )
+        print(
+            f"  Logging configured: {settings.logging.log_level.value} level, rotation enabled"
+        )
 
     # Check Docker socket access
     docker_accessible = check_docker_socket_access()
     docker_host = os.environ.get("DOCKER_HOST", "/var/run/docker.sock")
     if docker_accessible:
         if docker_host.startswith("tcp://"):
-            print(f"✅ Docker socket proxy accessible: {docker_host}")
+            print(f"  Docker socket proxy accessible: {docker_host}")
         else:
-            print("✅ Docker socket accessible")
+            print("  Docker socket accessible")
     else:
-        print(f"⚠️ Docker socket not accessible: {docker_host}")
+        print(f"   Docker socket not accessible: {docker_host}")
         print("   Container discovery and updates will not work")
         if not docker_host.startswith("tcp://"):
             print("   Ensure socket is mounted with :ro and user has access")
@@ -224,87 +238,87 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any]:
     # Database initialization (M0 implementation)
     if DATABASE_AVAILABLE and startup_success:
         try:
-            print("🗄️ Initializing database...")
+            print("   Initializing database...")
             db_ready = await ensure_database_ready()
 
             if not db_ready:
                 print(
-                    "❌ Failed to initialize database - application may not work correctly"
+                    "  Failed to initialize database - application may not work correctly"
                 )
                 startup_success = False
             else:
-                print("✅ Database initialization completed successfully")
+                print("  Database initialization completed successfully")
 
                 # Initialize session manager
                 session_manager = get_session_manager()
                 await session_manager.initialize()
-                print("✅ Database session manager initialized")
+                print("  Database session manager initialized")
 
                 # Get database info for logging
                 try:
                     db_info = await get_database_info()
                     print(
-                        f"📊 Database info: {db_info.get('dialect', 'unknown')} "
+                        f"  Database info: {db_info.get('dialect', 'unknown')} "
                         f"({db_info.get('table_count', 0)} tables)"
                     )
 
                     if "size_mb" in db_info:
-                        print(f"💾 Database size: {db_info['size_mb']} MB")
+                        print(f"  Database size: {db_info['size_mb']} MB")
 
                 except Exception as e:
                     logger.warning(f"Could not get database info: {e}")
-                    print(f"⚠️ Could not get database info: {e}")
+                    print(f"   Could not get database info: {e}")
 
         except Exception as e:
             logger.error(f"Database initialization failed: {e}")
-            print(f"❌ Database initialization failed: {e}")
+            print(f"  Database initialization failed: {e}")
             startup_success = False
             db_ready = False
     elif not DATABASE_AVAILABLE:
-        print("⚠️ Database system not available")
+        print("   Database system not available")
         startup_success = False
         db_ready = False
 
     # Only show development credentials if database is ready and in development mode
     if db_ready and settings and settings.deployment_profile.value == "development":
-        print("\n🔐 Development Credentials:")
+        print("\n  Development Credentials:")
         print("   Username: admin")
         print("   Password: Harbor123!")
         print("   Dashboard: http://localhost:8080")
 
     # Security middleware status (M0 implementation)
     if SECURITY_AVAILABLE:
-        print("🔒 Security middleware: ✅ Enabled")
-        print("  - Security headers: ✅")
-        print("  - Rate limiting: ✅")
-        print("  - Input validation: ✅")
+        print("  Security middleware:   Enabled")
+        print("  - Security headers:  ")
+        print("  - Rate limiting:  ")
+        print("  - Input validation:  ")
     else:
-        print("⚠️ Security middleware not available")
+        print("   Security middleware not available")
 
     # Final startup status
     if startup_success:
-        print("🌟 Harbor application startup completed successfully")
+        print("  Harbor application startup completed successfully")
     else:
-        print("⚠️ Harbor application started with issues - some features may not work")
+        print("   Harbor application started with issues - some features may not work")
 
-    print("🌐 Starting server...")
+    print("  Starting server...")
 
     yield
 
     # Shutdown tasks
-    print("🛑 Shutting down Harbor Container Updater...")
+    print("  Shutting down Harbor Container Updater...")
 
     try:
         # Close database connections
         if session_manager:
             await session_manager.close()
-            print("✅ Database connections closed")
+            print("  Database connections closed")
 
     except Exception as e:
         logger.error(f"Error during shutdown: {e}")
-        print(f"❌ Error during shutdown: {e}")
+        print(f"  Error during shutdown: {e}")
 
-    print("✅ Harbor application shutdown completed")
+    print("  Harbor application shutdown completed")
 
 
 def create_app() -> FastAPI:
@@ -362,6 +376,16 @@ def create_app() -> FastAPI:
             RequestLoggingMiddleware,
         )
 
+        # Try to import CorrelationMiddleware if it exists
+        try:
+            from app.middleware.correlation import CorrelationMiddleware
+
+            # Add correlation middleware first (enhances request IDs)
+            app.add_middleware(CorrelationMiddleware)
+            logger.info("Correlation middleware configured")
+        except ImportError:
+            logger.info("Correlation middleware not available yet")
+
         # Add request logging middleware (runs first to log all requests)
         app.add_middleware(RequestLoggingMiddleware)
 
@@ -372,14 +396,14 @@ def create_app() -> FastAPI:
     except ImportError as e:
         logger.warning(f"Additional middleware not available: {e}")
         if debug_mode:
-            print(f"⚠️ Additional middleware not available: {e}")
+            print(f"   Additional middleware not available: {e}")
 
     # Set up security middleware (M0 milestone)
     if SECURITY_AVAILABLE:
         try:
             # Method 1: Use the setup function from security module
             app = setup_security_middleware(app)
-            print("🔒 Security middleware configured via setup function")
+            print("  Security middleware configured via setup function")
 
         except Exception as e:
             # Method 2: Fallback to manual middleware setup
@@ -388,14 +412,14 @@ def create_app() -> FastAPI:
                 app.add_middleware(RateLimitMiddleware)
                 app.add_middleware(SecurityHeadersMiddleware)
 
-                print("🔒 Security middleware configured manually")
+                print("  Security middleware configured manually")
             except Exception as e2:
                 logger.error(f"Security middleware setup failed: {e2}, original: {e}")
-                print(f"⚠️ Security middleware setup failed: {e2}")
+                print(f"   Security middleware setup failed: {e2}")
                 print(f"Original setup error: {e}")
     else:
         print(
-            "⚠️ Security middleware not available - continuing without security features"
+            "   Security middleware not available - continuing without security features"
         )
 
     # Register API routers
@@ -403,8 +427,15 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router)
 
-    # Health check endpoint (required for Docker health checks)
-    @app.get("/healthz")
+    # Try to import and register health router if it exists
+    try:
+        from app.api.health import router as health_router
+
+        app.include_router(health_router)
+    except ImportError:
+        logger.info("Health API router not available yet")
+
+    # Health check endpoint (required for Docker health checks)    @app.get("/healthz")
     async def health_check() -> dict[str, Any]:
         """Enhanced health check endpoint with database status and runtime info."""
         try:
@@ -975,9 +1006,9 @@ def main() -> None:
     TODO: Implement CLI interface in later milestones.
     Currently shows Harbor information and M0 progress.
     """
-    print(f"🚢 Harbor Container Updater v{__version__}")
-    print(f"🎯 Status: {__status__} ({__milestone__} Milestone)")
-    print(f"📖 Description: {__description__}")
+    print(f"  Harbor Container Updater v{__version__}")
+    print(f"  Status: {__status__} ({__milestone__} Milestone)")
+    print(f"  Description: {__description__}")
     print()
 
     # Show runtime user info
@@ -985,96 +1016,96 @@ def main() -> None:
         uid = os.getuid()
         gid = os.getgid()
         print(
-            f"👤 Running as: UID={uid}, GID={gid} ({'root' if uid == 0 else 'non-root'})"
+            f"  Running as: UID={uid}, GID={gid} ({'root' if uid == 0 else 'non-root'})"
         )
         if uid == 0:
-            print("⚠️  Warning: Running as root is not recommended")
+            print("    Warning: Running as root is not recommended")
     print()
 
     # Show M0 milestone progress with database integration
-    print("📋 M0 Milestone Progress:")
-    print("  ✅ Configuration system")
-    print(f"  {'✅' if SECURITY_AVAILABLE else '❌'} Security middleware")
-    print("  ✅ Rate limiting")
-    print("  ✅ Input validation")
-    print("  ✅ Security headers")
-    print(f"  {'✅' if DATABASE_AVAILABLE else '❌'} Database models")
-    print(f"  {'✅' if DATABASE_AVAILABLE else '❌'} Session management")
-    print(f"  {'✅' if DATABASE_AVAILABLE else '❌'} Repository pattern")
-    print("  ⏳ Authentication system (next)")
-    print("  ⏳ API endpoints (next)")
-    print("  ⏳ Template system (next)")
+    print("  M0 Milestone Progress:")
+    print("    Configuration system")
+    print(f"  {' ' if SECURITY_AVAILABLE else ' '} Security middleware")
+    print("    Rate limiting")
+    print("    Input validation")
+    print("    Security headers")
+    print(f"  {' ' if DATABASE_AVAILABLE else ' '} Database models")
+    print(f"  {' ' if DATABASE_AVAILABLE else ' '} Session management")
+    print(f"  {' ' if DATABASE_AVAILABLE else ' '} Repository pattern")
+    print("    Authentication system (next)")
+    print("    API endpoints (next)")
+    print("    Template system (next)")
     print()
 
     # Show configuration info if available
     if CONFIG_AVAILABLE:
         try:
             settings = get_settings()
-            print("⚙️ Current Configuration:")
+            print("   Current Configuration:")
             print(f"  Profile: {settings.deployment_profile.value}")
             print(f"  Database: {settings.database.database_type.value}")
             print(f"  Data directory: {settings.data_dir}")
             print(f"  Debug mode: {settings.debug}")
             print(
-                f"  Security middleware: {'✅' if SECURITY_AVAILABLE else '❌'} {'Enabled' if SECURITY_AVAILABLE else 'Missing'}"
+                f"  Security middleware: {' ' if SECURITY_AVAILABLE else ' '} {'Enabled' if SECURITY_AVAILABLE else 'Missing'}"
             )
             print(
-                f"  Database system: {'✅' if DATABASE_AVAILABLE else '❌'} {'Ready' if DATABASE_AVAILABLE else 'Missing'}"
+                f"  Database system: {' ' if DATABASE_AVAILABLE else ' '} {'Ready' if DATABASE_AVAILABLE else 'Missing'}"
             )
             print()
         except Exception as e:
-            print(f"⚠️ Configuration error: {e}")
+            print(f"   Configuration error: {e}")
             print()
 
-    print("🚀 To run Harbor:")
+    print("  To run Harbor:")
     print("  uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8080")
     print()
-    print("🔧 For development:")
+    print("  For development:")
     print("  uvicorn app.main:create_app --factory --reload")
     print()
 
     if DATABASE_AVAILABLE:
-        print("🗄️ Database endpoints:")
+        print("   Database endpoints:")
         print("  curl http://localhost:8080/database/status | jq .")
         print("  curl http://localhost:8080/database/health | jq .")
         print()
 
     if SECURITY_AVAILABLE:
-        print("🔒 Security endpoints:")
+        print("  Security endpoints:")
         print("  curl http://localhost:8080/security/status | jq .")
         print(
             "  curl -I http://localhost:8080/ | grep -E '(X-|Content-Security|Strict-Transport)'"
         )
         print()
 
-    print("🧪 Test complete system:")
+    print("  Test complete system:")
     print("  python test_db_implementation.py --verbose")
     print("  python test_security_middleware.py")
     print()
 
     if DATABASE_AVAILABLE:
-        print("🧪 Test database models:")
+        print("  Test database models:")
         print("  python -m pytest tests/unit/db/ -v --database")
         print("  python -m pytest tests/integration/test_database.py -v --integration")
         print()
 
-    print("📚 Documentation:")
+    print("  Documentation:")
     print("  http://localhost:8080/docs (when running)")
     print("  http://localhost:8080/redoc (alternative docs)")
     print()
 
-    print("🎉 M0 Implementation Status:")
-    print(f"  Configuration: {'✅ Ready' if CONFIG_AVAILABLE else '❌ Missing'}")
-    print(f"  Security: {'✅ Ready' if SECURITY_AVAILABLE else '❌ Missing'}")
-    print(f"  Database: {'✅ Ready' if DATABASE_AVAILABLE else '❌ Missing'}")
+    print("  M0 Implementation Status:")
+    print(f"  Configuration: {'  Ready' if CONFIG_AVAILABLE else '  Missing'}")
+    print(f"  Security: {'  Ready' if SECURITY_AVAILABLE else '  Missing'}")
+    print(f"  Database: {'  Ready' if DATABASE_AVAILABLE else '  Missing'}")
 
     if CONFIG_AVAILABLE and SECURITY_AVAILABLE and DATABASE_AVAILABLE:
-        print("\n🌟 All M0 core systems ready! You can now:")
+        print("\n  All M0 core systems ready! You can now:")
         print("  1. Start the application with uvicorn")
         print("  2. Run comprehensive tests")
         print("  3. Begin M0 Authentication System implementation")
     else:
-        print("\n⚠️ Some M0 systems need attention before proceeding")
+        print("\n   Some M0 systems need attention before proceeding")
 
 
 if __name__ == "__main__":
