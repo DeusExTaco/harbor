@@ -462,7 +462,7 @@ def rate_limit(
 async def test_rate_limiter() -> None:
     """Test rate limiter functionality."""
 
-    print("🚦 Testing Harbor Rate Limiter")
+    print("  Testing Harbor Rate Limiter")
     print("=" * 35)
 
     # Test sliding window rate limiter
@@ -477,14 +477,14 @@ async def test_rate_limiter() -> None:
 
     for i in range(7):  # Try 7 requests (limit is 5)
         allowed, info = await limiter.is_allowed(test_key)
-        status = "✅ ALLOWED" if allowed else "❌ BLOCKED"
+        status = "  ALLOWED" if allowed else "  BLOCKED"
         print(f"Request {i + 1}: {status} (remaining: {info['remaining']})")
 
         if i == 4:  # After 5 requests, wait a bit
-            print("  ⏳ Waiting 2 seconds...")
+            print("    Waiting 2 seconds...")
             await asyncio.sleep(2)
 
-    print("\n📊 Rate Limit Test Complete")
+    print("\n  Rate Limit Test Complete")
 
 
 if __name__ == "__main__":

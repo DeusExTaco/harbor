@@ -1,11 +1,17 @@
 #!/bin/bash
 # scripts/dev/run_all_tests.sh
-# shellcheck disable=SC2289
 """
-Harbor Complete Test Suite Runner - Extended Version
+Harbor Complete Test Suite Runner
 
-Runs all tests including additional security and integration tests.
-Stops on first failure for critical tests (1-7), then continues with extended tests.
+Runs all tests with proper organization:
+- Core Tests (1-11): Stop on first failure
+- Server/API Tests (12-15): Optional with --skip-server
+- Extended Tests (16-20): Optional with --quick, continue on failure
+
+Test Organization:
+- Test 4: Security Middleware Smoke Test (quick validation)
+- Test 5: Complete Middleware Test (comprehensive with coverage)
+- Test 6: Security System Test (auth/authz focused, no middleware duplication)
 
 Usage:
     ./run_all_tests.sh [--skip-server] [--quick]
@@ -79,11 +85,24 @@ print_test_result() {
         echo -e "${RED}❌ [TEST $test_num] FAILED: $test_name${NC}"
         test_results["$test_num"]="FAIL"
     fi
-    test_order+=("$test_num")
+
+    # Add to test_order only if not already present
+    local already_added=false
+    for num in "${test_order[@]}"; do
+        if [ "$num" = "$test_num" ]; then
+            already_added=true
+            break
+        fi
+    done
+
+    if [ "$already_added" = false ]; then
+        test_order+=("$test_num")
+    fi
+
     echo ""
 }
 
-# Function to print summary
+# Function to print summary with numerical order
 print_summary() {
     print_header "TEST SUMMARY"
 
@@ -91,44 +110,55 @@ print_summary() {
     local warned=0
     local failed=0
 
-    for test_num in "${test_order[@]}"; do
+    # Sort test_order numerically
+    IFS=$'\n' sorted_tests=($(sort -n <<<"${test_order[*]}"))
+    unset IFS
+
+    for test_num in "${sorted_tests[@]}"; do
         local status="${test_results[$test_num]}"
         local test_name=""
 
         case $test_num in
             1) test_name="Configuration System Test";;
-            2) test_name="Environment Check";;
-            3) test_name="Security Middleware Test";;
-            4) test_name="Complete Security Test";;  # NEW
-            5) test_name="Database Implementation Test";;
-            6) test_name="Authentication System Test";;
-            7) test_name="API Key Manual Test";;
-            8) test_name="Pre-commit Checks";;
-            9) test_name="Server Start";;
-            10) test_name="Login API Test";;
-            11) test_name="API Key Creation Test";;
-            12) test_name="API Key Authentication Test";;
-            13) test_name="Docker Integration Test";;
-            14) test_name="Registry Client Test";;
-            15) test_name="Security Scan";;
-            16) test_name="Import Cycle Detection";;
-            17) test_name="Performance Baseline";;
+            2) test_name="Project Structure Validation";;
+            3) test_name="Environment Check";;
+            4) test_name="Security Middleware Smoke Test";;
+            5) test_name="Complete Middleware Test";;
+            6) test_name="Security System Test";;
+            7) test_name="Complete Logging Test";;
+            8) test_name="Database Implementation Test";;
+            9) test_name="Authentication System Test";;
+            10) test_name="API Key Manual Test";;
+            11) test_name="Pre-commit Checks";;
+            12) test_name="Server Start";;
+            13) test_name="Login API Test";;
+            14) test_name="API Key Creation Test";;
+            15) test_name="API Key Authentication Test";;
+            16) test_name="Docker Integration Test";;
+            17) test_name="Registry Client Test";;
+            18) test_name="Security Scan";;
+            19) test_name="Import Cycle Detection";;
+            20) test_name="Performance Baseline";;
         esac
 
-        if [ "$status" = "PASS" ]; then
-            echo -e "${GREEN}✅ Test $test_num: $test_name${NC}"
-            ((passed++))
-        elif [ "$status" = "WARN" ]; then
-            echo -e "${YELLOW}⚠️  Test $test_num: $test_name${NC}"
-            ((warned++))
-        else
-            echo -e "${RED}❌ Test $test_num: $test_name${NC}"
-            ((failed++))
+        if [ -n "$test_name" ]; then
+            if [ "$status" = "PASS" ]; then
+                printf "${GREEN}✅ Test %2d: %-40s [PASS]${NC}\n" "$test_num" "$test_name"
+                ((passed++))
+            elif [ "$status" = "WARN" ]; then
+                printf "${YELLOW}⚠️  Test %2d: %-40s [WARN]${NC}\n" "$test_num" "$test_name"
+                ((warned++))
+            elif [ "$status" = "FAIL" ]; then
+                printf "${RED}❌ Test %2d: %-40s [FAIL]${NC}\n" "$test_num" "$test_name"
+                ((failed++))
+            fi
         fi
     done
 
     echo ""
-    echo "Total: $passed passed, $warned warnings, $failed failed out of ${#test_order[@]} tests"
+    echo "┌────────────────────────────────────────────────────────────┐"
+    printf "│ Total: %-3d passed, %-3d warnings, %-3d failed out of %-3d tests │\n" "$passed" "$warned" "$failed" "${#sorted_tests[@]}"
+    echo "└────────────────────────────────────────────────────────────┘"
 
     if [ $failed -eq 0 ]; then
         if [ $warned -gt 0 ]; then
@@ -158,7 +188,7 @@ trap cleanup_server EXIT
 # Change to project root (assuming script is in scripts/dev)
 cd "$(dirname "$0")/../.." || exit 1
 
-print_header "HARBOR COMPLETE TEST SUITE (EXTENDED)"
+print_header "HARBOR COMPLETE TEST SUITE"
 echo "Starting comprehensive test suite..."
 echo "Working directory: $(pwd)"
 echo "Python version: $(python --version)"
@@ -166,7 +196,7 @@ echo "Mode: $([ "$QUICK_MODE" = true ] && echo "QUICK" || echo "FULL")"
 echo ""
 
 # ============================================================================
-# CORE TESTS (1-8) - Stop on failure
+# CORE TESTS (1-11) - Stop on failure
 # ============================================================================
 
 # Test 1: Configuration System
@@ -179,140 +209,124 @@ else
     exit 1
 fi
 
-# Test 2: Environment Check
-print_test_start 2 "Environment Check"
+# Test 2: Project Structure Validation
+print_test_start 2 "Project Structure Validation"
+if python scripts/dev/test_structure.py; then
+    print_test_result 2 "Project Structure Validation" "PASS"
+else
+    print_test_result 2 "Project Structure Validation" "FAIL"
+    print_summary
+    exit 1
+fi
+
+# Test 3: Environment Check
+print_test_start 3 "Environment Check"
 if python scripts/dev/check_environment.py; then
-    print_test_result 2 "Environment Check" "PASS"
+    print_test_result 3 "Environment Check" "PASS"
 else
-    print_test_result 2 "Environment Check" "FAIL"
+    print_test_result 3 "Environment Check" "FAIL"
     print_summary
     exit 1
 fi
 
-# Test 3: Security Middleware (Basic)
-print_test_start 3 "Security Middleware Test"
+# Test 4: Security Middleware Smoke Test (quick validation)
+print_test_start 4 "Security Middleware Smoke Test"
+echo "Running quick middleware validation..."
 if python scripts/dev/test_security_middleware.py; then
-    print_test_result 3 "Security Middleware Test" "PASS"
+    print_test_result 4 "Security Middleware Smoke Test" "PASS"
 else
-    print_test_result 3 "Security Middleware Test" "FAIL"
+    print_test_result 4 "Security Middleware Smoke Test" "FAIL"
     print_summary
     exit 1
 fi
 
-# Test 4: Complete Security Test (NEW - Comprehensive)
-print_test_start 4 "Complete Security Test"
+# Test 5: Complete Middleware Test (comprehensive)
+print_test_start 5 "Complete Middleware Test"
+echo "Running comprehensive middleware test suite..."
+echo "This includes unit tests, integration tests, and coverage reporting..."
+if python scripts/dev/test_complete_middleware.py; then
+    print_test_result 5 "Complete Middleware Test" "PASS"
+else
+    print_test_result 5 "Complete Middleware Test" "FAIL"
+    print_summary
+    exit 1
+fi
+
+# Test 6: Security System Test (focused on auth/authz)
+print_test_start 6 "Security System Test"
+echo "Testing authentication and authorization systems..."
 if python scripts/dev/test_complete_security.py; then
-    print_test_result 4 "Complete Security Test" "PASS"
+    print_test_result 6 "Security System Test" "PASS"
 else
-    print_test_result 4 "Complete Security Test" "FAIL"
+    print_test_result 6 "Security System Test" "FAIL"
     print_summary
     exit 1
 fi
 
-# Test 5: Database Implementation
-print_test_start 5 "Database Implementation Test"
+# Test 7: Complete Logging Test
+print_test_start 7 "Complete Logging Test"
+if python scripts/dev/test_complete_logging.py; then
+    print_test_result 7 "Complete Logging Test" "PASS"
+else
+    print_test_result 7 "Complete Logging Test" "FAIL"
+    print_summary
+    exit 1
+fi
+
+# Test 8: Database Implementation
+print_test_start 8 "Database Implementation Test"
 if python scripts/dev/test_db_implementation.py --verbose; then
-    print_test_result 5 "Database Implementation Test" "PASS"
+    print_test_result 8 "Database Implementation Test" "PASS"
 else
-    print_test_result 5 "Database Implementation Test" "FAIL"
+    print_test_result 8 "Database Implementation Test" "FAIL"
     print_summary
     exit 1
 fi
 
-# Test 6: Authentication System
-print_test_start 6 "Authentication System Test"
+# Test 9: Authentication System
+print_test_start 9 "Authentication System Test"
 if python scripts/dev/test_auth_system.py; then
-    print_test_result 6 "Authentication System Test" "PASS"
+    print_test_result 9 "Authentication System Test" "PASS"
 else
-    print_test_result 6 "Authentication System Test" "FAIL"
+    print_test_result 9 "Authentication System Test" "FAIL"
     print_summary
     exit 1
 fi
 
-# Test 7: API Key Manual Test
-print_test_start 7 "API Key Manual Test"
+# Test 10: API Key Manual Test
+print_test_start 10 "API Key Manual Test"
 if python scripts/dev/test_api_key_manual.py; then
-    print_test_result 7 "API Key Manual Test" "PASS"
+    print_test_result 10 "API Key Manual Test" "PASS"
 else
-    print_test_result 7 "API Key Manual Test" "FAIL"
+    print_test_result 10 "API Key Manual Test" "FAIL"
     print_summary
     exit 1
 fi
 
-# Test 8: Pre-commit Checks
-print_test_start 8 "Pre-commit Checks"
+# Test 11: Pre-commit Checks
+print_test_start 11 "Pre-commit Checks"
 if pre-commit run --all-files; then
-    print_test_result 8 "Pre-commit Checks" "PASS"
+    print_test_result 11 "Pre-commit Checks" "PASS"
 else
-    print_test_result 8 "Pre-commit Checks" "FAIL"
+    print_test_result 11 "Pre-commit Checks" "FAIL"
     print_summary
     exit 1
 fi
 
 # All core tests passed
 echo ""
-echo -e "${GREEN}✅ All core tests (1-8) passed!${NC}"
+echo -e "${GREEN}✅ All core tests (1-11) passed!${NC}"
 
 # ============================================================================
-# EXTENDED TESTS (13-17) - Continue on failure
-# ============================================================================
-
-if [ "$QUICK_MODE" = false ]; then
-    echo "Running extended test suite..."
-
-    # Test 13: Docker Integration
-    print_test_start 13 "Docker Integration Test"
-    if python scripts/dev/test_docker_integration.py; then
-        print_test_result 13 "Docker Integration Test" "PASS"
-    else
-        print_test_result 13 "Docker Integration Test" "WARN"
-    fi
-
-    # Test 14: Registry Client
-    print_test_start 14 "Registry Client Test"
-    if python scripts/dev/test_registry_client.py; then
-        print_test_result 14 "Registry Client Test" "PASS"
-    else
-        print_test_result 14 "Registry Client Test" "WARN"
-    fi
-
-    # Test 15: Security Scan
-    print_test_start 15 "Security Scan"
-    if python scripts/dev/test_security_scan.py; then
-        print_test_result 15 "Security Scan" "PASS"
-    else
-        print_test_result 15 "Security Scan" "WARN"
-    fi
-
-    # Test 16: Import Cycle Detection
-    print_test_start 16 "Import Cycle Detection"
-    if python scripts/dev/test_import_cycles.py; then
-        print_test_result 16 "Import Cycle Detection" "PASS"
-    else
-        print_test_result 16 "Import Cycle Detection" "WARN"
-    fi
-
-    # Test 17: Performance Baseline
-    print_test_start 17 "Performance Baseline"
-    if python scripts/dev/test_performance_baseline.py; then
-        print_test_result 17 "Performance Baseline" "PASS"
-    else
-        print_test_result 17 "Performance Baseline" "WARN"
-    fi
-else
-    echo "Skipping extended tests (quick mode)..."
-fi
-
-# ============================================================================
-# SERVER AND API TESTS (9-12)
+# SERVER AND API TESTS (12-15)
 # ============================================================================
 
 if [ "$SKIP_SERVER" = false ]; then
     echo ""
     echo "Proceeding to server tests..."
 
-    # Test 9: Start Server
-    print_test_start 9 "Server Start"
+    # Test 12: Start Server
+    print_test_start 12 "Server Start"
     echo "Starting Harbor server..."
 
     # Create a temporary file for server output
@@ -343,53 +357,53 @@ if [ "$SKIP_SERVER" = false ]; then
 
     if [ "$SERVER_READY" = true ]; then
         echo -e "${GREEN}Server started successfully!${NC}"
-        print_test_result 9 "Server Start" "PASS"
+        print_test_result 12 "Server Start" "PASS"
 
-        # Test 10: Login API Test
-        print_test_start 10 "Login API Test"
+        # Test 13: Login API Test
+        print_test_start 13 "Login API Test"
         echo "Testing login endpoint..."
 
         LOGIN_RESPONSE=$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
-          -H "Content-Type: application/json" \
-          -d '{"username": "admin", "password": "3CdCDURCtKQiArev"}' 2>&1) # pragma: allowlist secret
+            -H "Content-Type: application/json" \
+            -d '{"username": "admin", "password": "3CdCDURCtKQiArev"}' 2>&1) # pragma: allowlist secret
 
         echo "Response:"
         echo "$LOGIN_RESPONSE" | python -m json.tool 2>/dev/null || echo "$LOGIN_RESPONSE"
 
         if echo "$LOGIN_RESPONSE" | grep -q '"success"'; then
-            print_test_result 10 "Login API Test" "PASS"
+            print_test_result 13 "Login API Test" "PASS"
             CSRF_TOKEN=$(echo "$LOGIN_RESPONSE" | python -c "import sys, json; print(json.load(sys.stdin).get('csrf_token', ''))" 2>/dev/null)
         else
-            print_test_result 10 "Login API Test" "WARN"
+            print_test_result 13 "Login API Test" "WARN"
         fi
 
-        # Test 11: API Key Creation Test
-        print_test_start 11 "API Key Creation Test"
+        # Test 14: API Key Creation Test
+        print_test_start 14 "API Key Creation Test"
         echo "Testing API key creation..."
 
         if [ -z "$CSRF_TOKEN" ]; then
             echo "No CSRF token available, skipping test"
-            print_test_result 11 "API Key Creation Test" "WARN"
+            print_test_result 14 "API Key Creation Test" "WARN"
         else
             KEY_CREATE_RESPONSE=$(curl -s -X POST http://localhost:8080/api/v1/auth/api-keys \
-              -H "Content-Type: application/json" \
-              -H "X-CSRF-Token: $CSRF_TOKEN" \
-              -c cookies.txt \
-              -d '{"name": "test-key", "description": "Test API key"}' 2>&1)
+                -H "Content-Type: application/json" \
+                -H "X-CSRF-Token: $CSRF_TOKEN" \
+                -c cookies.txt \
+                -d '{"name": "test-key", "description": "Test API key"}' 2>&1)
 
             echo "Response:"
             echo "$KEY_CREATE_RESPONSE" | python -m json.tool 2>/dev/null || echo "$KEY_CREATE_RESPONSE"
 
             if echo "$KEY_CREATE_RESPONSE" | grep -q '"api_key"'; then
-                print_test_result 11 "API Key Creation Test" "PASS"
+                print_test_result 14 "API Key Creation Test" "PASS"
                 API_KEY=$(echo "$KEY_CREATE_RESPONSE" | python -c "import sys, json; print(json.load(sys.stdin).get('api_key', ''))" 2>/dev/null)
             else
-                print_test_result 11 "API Key Creation Test" "WARN"
+                print_test_result 14 "API Key Creation Test" "WARN"
             fi
         fi
 
-        # Test 12: API Key Authentication Test
-        print_test_start 12 "API Key Authentication Test"
+        # Test 15: API Key Authentication Test
+        print_test_start 15 "API Key Authentication Test"
         echo "Testing API key authentication..."
 
         if [ -z "$API_KEY" ]; then
@@ -398,22 +412,25 @@ if [ "$SKIP_SERVER" = false ]; then
         fi
 
         AUTH_RESPONSE=$(curl -s http://localhost:8080/api/v1/auth/me \
-          -H "X-API-Key: $API_KEY" 2>&1)
+            -H "X-API-Key: $API_KEY" 2>&1)
 
         echo "Response:"
         echo "$AUTH_RESPONSE" | python -m json.tool 2>/dev/null || echo "$AUTH_RESPONSE"
 
         if echo "$AUTH_RESPONSE" | grep -q '"username"'; then
-            print_test_result 12 "API Key Authentication Test" "PASS"
+            print_test_result 15 "API Key Authentication Test" "PASS"
         else
-            print_test_result 12 "API Key Authentication Test" "WARN"
+            print_test_result 15 "API Key Authentication Test" "WARN"
         fi
 
     else
         echo -e "${RED}Server failed to start${NC}"
         echo "Server log:"
         cat "$SERVER_LOG"
-        print_test_result 9 "Server Start" "FAIL"
+        print_test_result 12 "Server Start" "FAIL"
+        print_test_result 13 "Login API Test" "FAIL"
+        print_test_result 14 "API Key Creation Test" "FAIL"
+        print_test_result 15 "API Key Authentication Test" "FAIL"
     fi
 
     # Clean up
@@ -423,6 +440,83 @@ if [ "$SKIP_SERVER" = false ]; then
 else
     echo ""
     echo "Skipping server and API tests..."
+fi
+
+# ============================================================================
+# EXTENDED TESTS (16-20) - Continue on failure
+# ============================================================================
+
+if [ "$QUICK_MODE" = false ]; then
+    echo ""
+    echo "Running extended test suite..."
+
+    # Test 16: Docker Integration
+    print_test_start 16 "Docker Integration Test"
+    if [ -f "scripts/dev/test_docker_integration.py" ]; then
+        if python scripts/dev/test_docker_integration.py; then
+            print_test_result 16 "Docker Integration Test" "PASS"
+        else
+            print_test_result 16 "Docker Integration Test" "WARN"
+        fi
+    else
+        echo "Test file not found, skipping..."
+        print_test_result 16 "Docker Integration Test" "WARN"
+    fi
+
+    # Test 17: Registry Client
+    print_test_start 17 "Registry Client Test"
+    if [ -f "scripts/dev/test_registry_client.py" ]; then
+        if python scripts/dev/test_registry_client.py; then
+            print_test_result 17 "Registry Client Test" "PASS"
+        else
+            print_test_result 17 "Registry Client Test" "WARN"
+        fi
+    else
+        echo "Test file not found, skipping..."
+        print_test_result 17 "Registry Client Test" "WARN"
+    fi
+
+    # Test 18: Security Scan
+    print_test_start 18 "Security Scan"
+    if [ -f "scripts/dev/test_security_scan.py" ]; then
+        if python scripts/dev/test_security_scan.py; then
+            print_test_result 18 "Security Scan" "PASS"
+        else
+            print_test_result 18 "Security Scan" "WARN"
+        fi
+    else
+        echo "Test file not found, skipping..."
+        print_test_result 18 "Security Scan" "WARN"
+    fi
+
+    # Test 19: Import Cycle Detection
+    print_test_start 19 "Import Cycle Detection"
+    if [ -f "scripts/dev/test_import_cycles.py" ]; then
+        if python scripts/dev/test_import_cycles.py; then
+            print_test_result 19 "Import Cycle Detection" "PASS"
+        else
+            print_test_result 19 "Import Cycle Detection" "WARN"
+        fi
+    else
+        echo "Test file not found, skipping..."
+        print_test_result 19 "Import Cycle Detection" "WARN"
+    fi
+
+    # Test 20: Performance Baseline
+    print_test_start 20 "Performance Baseline"
+    if [ -f "scripts/dev/test_performance_baseline.py" ]; then
+        if python scripts/dev/test_performance_baseline.py; then
+            print_test_result 20 "Performance Baseline" "PASS"
+        else
+            print_test_result 20 "Performance Baseline" "WARN"
+        fi
+    else
+        echo "Test file not found, skipping..."
+        print_test_result 20 "Performance Baseline" "WARN"
+    fi
+else
+    echo ""
+    echo "Skipping extended tests (quick mode)..."
 fi
 
 # Final summary

@@ -97,7 +97,7 @@ class APIKeyResponse(BaseModel):
     name: str
     created_at: datetime
     expires_at: datetime | None
-    warning: str = "⚠️ This key will only be shown once. Store it securely!"
+    warning: str = "   This key will only be shown once. Store it securely!"
 
 
 class UserInfo(BaseModel):
