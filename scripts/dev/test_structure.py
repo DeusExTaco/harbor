@@ -558,6 +558,7 @@ REQUIRED_PACKAGE_FILES = [
     "app/scheduler/__init__.py",
     "app/security/__init__.py",
     "app/utils/__init__.py",
+    "app/utils/logging/__init__.py",
     "app/middleware/__init__.py",
     "app/core/__init__.py",
 ]
@@ -579,8 +580,6 @@ REQUIRED_APP_FILES = [
     "app/db/init.py",
     # Core files
     "app/core/security.py",
-    # Utils files
-    "app/utils/logging.py",
     # Service files
     "app/services/health.py",
     # Middleware files

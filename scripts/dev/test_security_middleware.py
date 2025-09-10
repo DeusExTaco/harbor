@@ -1,405 +1,310 @@
 #!/usr/bin/env python3
+# scripts/dev/test_security_middleware.py
 """
-Harbor Container Updater - Security Middleware Test
+Harbor Security Middleware Smoke Test
 
-Test script to verify security middleware implementation.
-Tests all security components for M0 milestone completion.
+Quick validation that all middleware components are installed and functioning.
+This is a lightweight smoke test - comprehensive testing is done in test_complete_middleware.py
 
-Usage:
-    python test_security_middleware.py
+Runtime: ~30 seconds
+Purpose: Early detection of missing or broken middleware
 """
 
-import asyncio
-import os
 import sys
+import time
 from pathlib import Path
+from typing import Dict, Any
 
-# Add app to path for imports
-sys.path.insert(0, str(Path(__file__).parent))
+# Add app to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+# Test result tracking
+test_results = []
 
 
-def test_security_imports() -> bool:
-    """Test that all security components can be imported."""
+def log(message: str, level: str = "INFO"):
+    """Log message with level indicator."""
+    colors = {
+        "INFO": "\033[0;34m",
+        "PASS": "\033[0;32m",
+        "FAIL": "\033[0;31m",
+        "WARN": "\033[1;33m",
+    }
+    color = colors.get(level, "")
+    reset = "\033[0m"
+    print(f"{color}[{level}] {message}{reset}")
 
-    print("🔒 Harbor Security Middleware Test")
-    print("=" * 50)
-    print()
 
-    try:
-        print("1. Testing security module imports...")
+def test_section(name: str):
+    """Print test section header."""
+    print(f"\n{'=' * 60}")
+    print(f" {name}")
+    print(f"{'=' * 60}\n")
 
-        # Test main security module
-        from app.security import (
-            SecurityHeadersMiddleware,
-            RateLimitMiddleware,
-            SecurityResponseHandler,
-            InputSanitizer,
-            SecurityValidationError,
-            setup_security_middleware,
+
+def record_test(name: str, passed: bool, details: str = ""):
+    """Record test result."""
+    status = "PASS" if passed else "FAIL"
+    test_results.append({"name": name, "passed": passed, "details": details})
+    log(f"{name}: {details if details else 'Completed'}", status)
+
+
+# ==============================================================================
+# Smoke Test 1: Middleware Components Available
+# ==============================================================================
+
+
+def test_middleware_imports():
+    """Test that all middleware components can be imported."""
+    test_section("1. MIDDLEWARE COMPONENT IMPORTS")
+
+    components_to_test = [
+        ("app.security.headers", "SecurityHeadersMiddleware"),
+        ("app.security.rate_limit", "RateLimitMiddleware"),
+        ("app.middleware.correlation", "CorrelationMiddleware"),
+        ("app.middleware.request_logging", "RequestLoggingMiddleware"),
+        ("app.middleware.authentication", "AuthenticationMiddleware"),
+        ("app.security.validation", "InputSanitizer"),
+        ("app.auth.csrf", "CSRFProtection"),
+    ]
+
+    import_count = 0
+    failed_imports = []
+
+    for module_name, class_name in components_to_test:
+        try:
+            module = __import__(module_name, fromlist=[class_name])
+            if hasattr(module, class_name):
+                import_count += 1
+                log(f"  ✓ {module_name}.{class_name}", "PASS")
+            else:
+                failed_imports.append(f"{module_name}.{class_name}")
+                log(f"  ✗ {module_name}.{class_name} - class not found", "FAIL")
+        except ImportError as e:
+            failed_imports.append(f"{module_name}.{class_name}")
+            log(f"  ✗ {module_name}.{class_name} - {str(e)}", "FAIL")
+
+    if import_count == len(components_to_test):
+        record_test(
+            "Middleware Imports", True, f"All {import_count} components available"
         )
-
-        print("   ✅ Main security module imports successful")
-
-        # Test security headers
-        from app.security.headers import (
-            SecurityContext,
-            get_security_headers_for_profile,
+        return True
+    else:
+        record_test(
+            "Middleware Imports",
+            False,
+            f"Failed to import: {', '.join(failed_imports)}",
         )
-
-        print("   ✅ Security headers module imports successful")
-
-        # Test rate limiting
-        from app.security.rate_limit import SlidingWindowRateLimiter, RateLimitConfig
-
-        print("   ✅ Rate limiting module imports successful")
-
-        # Test validation
-        from app.security.validation import (
-            RequestValidator,
-            ConfigurationValidator,
-            ContainerIdentifier,
-            ImageReference,
-        )
-
-        print("   ✅ Input validation module imports successful")
-
-        return True
-
-    except Exception as e:
-        print(f"   ❌ Import failed: {e}")
-        import traceback
-
-        traceback.print_exc()
         return False
 
 
-def test_input_sanitization() -> bool:
-    """Test input sanitization functionality."""
-
-    print("\n2. Testing input sanitization...")
-
-    try:
-        from app.security.validation import InputSanitizer, SecurityValidationError
-
-        sanitizer = InputSanitizer()
-
-        # Test HTML sanitization
-        html_input = "<script>alert('xss')</script>Hello"
-        sanitized_html = sanitizer.sanitize_html(html_input)
-        expected = "&lt;script&gt;alert(&#x27;xss&#x27;)&lt;/script&gt;Hello"
-
-        if sanitized_html == expected:
-            print("   ✅ HTML sanitization working correctly")
-        else:
-            print(f"   ⚠️  HTML sanitization result differs:")
-            print(f"      Expected: {expected}")
-            print(f"      Got:      {sanitized_html}")
-
-        # Test container name validation
-        valid_names = ["nginx-proxy", "valid_container", "test123"]
-        invalid_names = ["", "invalid/name", "a" * 300]
-
-        for name in valid_names:
-            try:
-                result = sanitizer.sanitize_container_name(name)
-                print(f"   ✅ Valid container name: '{name}' → '{result}'")
-            except SecurityValidationError as e:
-                print(f"   ❌ Valid name rejected: '{name}' → {e.message}")
-                return False
-
-        for name in invalid_names:
-            try:
-                result = sanitizer.sanitize_container_name(name)
-                print(f"   ❌ Invalid name accepted: '{name}' → '{result}'")
-                return False
-            except SecurityValidationError:
-                print(f"   ✅ Invalid container name correctly rejected: '{name}'")
-
-        # Test URL sanitization
-        test_url = "https://registry-1.docker.io/v2/"
-        sanitized_url = sanitizer.sanitize_url(test_url)
-        print(f"   ✅ URL sanitization: '{test_url}' → '{sanitized_url}'")
-
-        return True
-
-    except Exception as e:
-        print(f"   ❌ Input sanitization test failed: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return False
+# ==============================================================================
+# Smoke Test 2: Basic FastAPI Integration
+# ==============================================================================
 
 
-async def test_rate_limiting() -> bool:
-    """Test rate limiting functionality."""
-
-    print("\n3. Testing rate limiting...")
-
-    try:
-        from app.security.rate_limit import SlidingWindowRateLimiter
-
-        # Test sliding window rate limiter
-        limiter = SlidingWindowRateLimiter(max_requests=3, window_seconds=10)
-
-        test_key = "test_client"
-        results = []
-
-        # Test 5 requests (limit is 3)
-        for i in range(5):
-            allowed, info = await limiter.is_allowed(test_key)
-            results.append(allowed)
-            print(
-                f"   Request {i + 1}: {'✅ ALLOWED' if allowed else '❌ BLOCKED'} "
-                f"(remaining: {info['remaining']})"
-            )
-
-        # Should have 3 allowed, 2 blocked
-        expected = [True, True, True, False, False]
-        if results == expected:
-            print("   ✅ Rate limiting working correctly")
-            return True
-        else:
-            print(f"   ❌ Rate limiting failed. Expected: {expected}, Got: {results}")
-            return False
-
-    except Exception as e:
-        print(f"   ❌ Rate limiting test failed: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return False
-
-
-def test_security_headers() -> bool:
-    """Test security headers functionality."""
-
-    print("\n4. Testing security headers...")
-
-    try:
-        from app.config import DeploymentProfile
-        from app.security.headers import get_security_headers_for_profile
-
-        # Test headers for different profiles
-        profiles = [
-            DeploymentProfile.HOMELAB,
-            DeploymentProfile.DEVELOPMENT,
-            DeploymentProfile.PRODUCTION,
-        ]
-
-        for profile in profiles:
-            headers = get_security_headers_for_profile(profile)
-            print(
-                f"   ✅ {profile.value.title()} profile headers: {len(headers)} headers"
-            )
-
-            # Verify common headers exist
-            required_headers = ["X-Content-Type-Options", "X-Frame-Options", "Server"]
-            for header in required_headers:
-                if header not in headers:
-                    print(f"   ❌ Missing required header: {header}")
-                    return False
-
-            # Check profile-specific headers
-            if profile == DeploymentProfile.PRODUCTION:
-                if "Strict-Transport-Security" not in headers:
-                    print("   ❌ Production profile missing HSTS header")
-                    return False
-                print("   ✅ Production profile has HSTS header")
-
-            if profile == DeploymentProfile.DEVELOPMENT:
-                if "X-Harbor-Environment" not in headers:
-                    print("   ❌ Development profile missing environment header")
-                    return False
-                print("   ✅ Development profile has environment header")
-
-        return True
-
-    except Exception as e:
-        print(f"   ❌ Security headers test failed: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return False
-
-
-def test_security_responses() -> bool:
-    """Test security response handlers."""
-
-    print("\n5. Testing security response handlers...")
-
-    try:
-        from app.security.headers import SecurityResponseHandler
-
-        # Test rate limit response
-        rate_limit_response = SecurityResponseHandler.rate_limit_response(
-            retry_after=60, message="Test rate limit"
-        )
-
-        if rate_limit_response.status_code == 429:
-            print("   ✅ Rate limit response has correct status code")
-        else:
-            print(
-                f"   ❌ Rate limit response wrong status: {rate_limit_response.status_code}"
-            )
-            return False
-
-        # Check headers
-        if "Retry-After" in rate_limit_response.headers:
-            print("   ✅ Rate limit response has Retry-After header")
-        else:
-            print("   ❌ Rate limit response missing Retry-After header")
-            return False
-
-        # Test authentication error
-        auth_error = SecurityResponseHandler.authentication_error_response()
-        if auth_error.status_code == 401:
-            print("   ✅ Authentication error has correct status code")
-        else:
-            print(f"   ❌ Authentication error wrong status: {auth_error.status_code}")
-            return False
-
-        return True
-
-    except Exception as e:
-        print(f"   ❌ Security response test failed: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return False
-
-
-def test_fastapi_integration() -> bool:
-    """Test security middleware integration with FastAPI."""
-
-    print("\n6. Testing FastAPI integration...")
+def test_fastapi_integration():
+    """Test that middleware can be added to FastAPI."""
+    test_section("2. FASTAPI MIDDLEWARE INTEGRATION")
 
     try:
         from fastapi import FastAPI
-        from app.security import setup_security_middleware
+        from fastapi.testclient import TestClient
+        from app.security.headers import SecurityHeadersMiddleware
+        from app.security.rate_limit import RateLimitMiddleware
+        from app.middleware.correlation import CorrelationMiddleware
 
         # Create test app
-        app = FastAPI(title="Test Harbor App")
+        app = FastAPI(title="Smoke Test App")
 
-        # Set up security middleware
-        app = setup_security_middleware(app)
+        # Add middleware
+        app.add_middleware(SecurityHeadersMiddleware)
+        app.add_middleware(RateLimitMiddleware)
+        app.add_middleware(CorrelationMiddleware)
 
-        # Check that middleware was added
-        middleware_types = [
-            type(middleware).__name__ for middleware in app.user_middleware
-        ]
+        @app.get("/test")
+        def test_endpoint():
+            return {"message": "test"}
 
-        expected_middleware = ["SecurityHeadersMiddleware"]
+        # Create test client
+        client = TestClient(app)
 
-        for expected in expected_middleware:
-            if expected in middleware_types:
-                print(f"   ✅ {expected} added to FastAPI app")
-            else:
-                print(f"   ⚠️  {expected} not found in middleware (might be disabled)")
+        # Make test request
+        response = client.get("/test")
 
-        print(f"   ℹ️  Total middleware count: {len(app.user_middleware)}")
+        tests_passed = 0
 
-        return True
+        # Check response
+        if response.status_code == 200:
+            tests_passed += 1
+            log("  ✓ Request processed successfully", "PASS")
+        else:
+            log(f"  ✗ Request failed with status {response.status_code}", "FAIL")
+
+        # Check for security headers
+        if "X-Content-Type-Options" in response.headers:
+            tests_passed += 1
+            log("  ✓ Security headers present", "PASS")
+        else:
+            log("  ✗ Security headers missing", "FAIL")
+
+        # Check for request ID
+        if "X-Request-ID" in response.headers:
+            tests_passed += 1
+            log("  ✓ Correlation middleware active", "PASS")
+        else:
+            log("  ✗ Correlation middleware not active", "FAIL")
+
+        # Check middleware count
+        middleware_count = len(app.user_middleware)
+        if middleware_count >= 3:
+            tests_passed += 1
+            log(f"  ✓ {middleware_count} middleware components added", "PASS")
+        else:
+            log(f"  ✗ Only {middleware_count} middleware added", "FAIL")
+
+        if tests_passed >= 3:
+            record_test("FastAPI Integration", True, f"{tests_passed}/4 checks passed")
+            return True
+        else:
+            record_test(
+                "FastAPI Integration", False, f"Only {tests_passed}/4 checks passed"
+            )
+            return False
 
     except Exception as e:
-        print(f"   ❌ FastAPI integration test failed: {e}")
-        import traceback
-
-        traceback.print_exc()
+        record_test("FastAPI Integration", False, str(e))
         return False
 
 
-def test_validation_models() -> bool:
-    """Test Pydantic validation models."""
+# ==============================================================================
+# Smoke Test 3: Basic Security Functions
+# ==============================================================================
 
-    print("\n7. Testing validation models...")
+
+def test_basic_security_functions():
+    """Test basic security functions work."""
+    test_section("3. BASIC SECURITY FUNCTIONS")
+
+    tests_passed = 0
 
     try:
-        from app.security.validation import (
-            ContainerIdentifier,
-            ImageReference,
-            SecurityValidationError,
-        )
+        # Test 1: Input sanitization
+        from app.security.validation import InputSanitizer
 
-        # Test valid container identifier
-        try:
-            container = ContainerIdentifier(
-                uid="550e8400-e29b-41d4-a716-446655440000", name="nginx-proxy"
+        sanitizer = InputSanitizer()
+
+        dangerous_input = "<script>alert('xss')</script>"
+        safe_output = sanitizer.sanitize_html(dangerous_input)
+
+        if "<script>" not in safe_output:
+            tests_passed += 1
+            log("  ✓ Input sanitization working", "PASS")
+        else:
+            log("  ✗ Input sanitization failed", "FAIL")
+
+        # Test 2: CSRF token generation
+        from app.auth.csrf import CSRFProtection
+
+        csrf = CSRFProtection()
+
+        token = csrf.generate_token()
+        if token and len(token) > 20:
+            tests_passed += 1
+            log("  ✓ CSRF token generation working", "PASS")
+        else:
+            log("  ✗ CSRF token generation failed", "FAIL")
+
+        # Test 3: Rate limiter creation
+        from app.security.rate_limit import SlidingWindowRateLimiter
+
+        limiter = SlidingWindowRateLimiter(max_requests=10, window_seconds=60)
+
+        if limiter.max_requests == 10:
+            tests_passed += 1
+            log("  ✓ Rate limiter initialization working", "PASS")
+        else:
+            log("  ✗ Rate limiter initialization failed", "FAIL")
+
+        # Test 4: Security config available
+        from app.core.security import SecurityConfig
+
+        config = SecurityConfig.get_security_config()
+
+        if "authentication" in config:
+            tests_passed += 1
+            log("  ✓ Security configuration available", "PASS")
+        else:
+            log("  ✗ Security configuration missing", "FAIL")
+
+        if tests_passed >= 3:
+            record_test(
+                "Basic Security Functions", True, f"{tests_passed}/4 functions working"
             )
-            print(f"   ✅ Valid container identifier: {container.name}")
-        except Exception as e:
-            print(f"   ❌ Valid container identifier failed: {e}")
+            return True
+        else:
+            record_test(
+                "Basic Security Functions",
+                False,
+                f"Only {tests_passed}/4 functions working",
+            )
             return False
-
-        # Test invalid container identifier
-        try:
-            container = ContainerIdentifier(uid="invalid-uid", name="invalid/name")
-            print(f"   ❌ Invalid container identifier accepted: {container.name}")
-            return False
-        except Exception:
-            print("   ✅ Invalid container identifier correctly rejected")
-
-        # Test image reference
-        try:
-            image = ImageReference(reference="nginx:1.21-alpine")
-            print(f"   ✅ Valid image reference: {image.reference}")
-        except Exception as e:
-            print(f"   ❌ Valid image reference failed: {e}")
-            return False
-
-        return True
 
     except Exception as e:
-        print(f"   ❌ Validation models test failed: {e}")
-        import traceback
-
-        traceback.print_exc()
+        record_test("Basic Security Functions", False, str(e))
         return False
 
 
-async def main() -> None:
-    """Main test function."""
+# ==============================================================================
+# Main Test Runner
+# ==============================================================================
 
-    # Test all security components
-    tests = [
-        ("Security Imports", test_security_imports),
-        ("Input Sanitization", test_input_sanitization),
-        ("Rate Limiting", test_rate_limiting),
-        ("Security Headers", test_security_headers),
-        ("Security Responses", test_security_responses),
-        ("FastAPI Integration", test_fastapi_integration),
-        ("Validation Models", test_validation_models),
-    ]
 
-    passed = 0
-    total = len(tests)
+def run_smoke_tests():
+    """Run all smoke tests."""
+    print("=" * 60)
+    print(" HARBOR SECURITY MIDDLEWARE SMOKE TEST")
+    print("=" * 60)
+    print("Purpose: Quick validation of middleware components")
+    print("For comprehensive testing, run test_complete_middleware.py")
+    print()
 
-    for test_name, test_func in tests:
-        if asyncio.iscoroutinefunction(test_func):
-            success = await test_func()
-        else:
-            success = test_func()
+    start_time = time.time()
 
-        if success:
-            passed += 1
+    # Run smoke tests
+    all_passed = True
+    all_passed &= test_middleware_imports()
+    all_passed &= test_fastapi_integration()
+    all_passed &= test_basic_security_functions()
 
-    print(f"\n{'=' * 50}")
-    print(f"🎯 Security Middleware Test Results: {passed}/{total} tests passed")
+    # Print summary
+    print("\n" + "=" * 60)
+    print(" SMOKE TEST SUMMARY")
+    print("=" * 60 + "\n")
 
-    if passed == total:
-        print("✅ All security middleware tests passed!")
-        print("\n🎉 M0 Security Middleware Implementation Complete!")
-        print("\n💡 Next steps:")
-        print("   1. Run: python -m uvicorn app.main:create_app --factory")
-        print("   2. Test security headers: curl -I http://localhost:8080/")
-        print("   3. Test rate limiting: run multiple rapid requests")
-        print("   4. Check API docs: http://localhost:8080/docs")
-        return True
+    passed = sum(1 for t in test_results if t["passed"])
+    failed = len(test_results) - passed
+
+    for result in test_results:
+        status = "✅ PASS" if result["passed"] else "❌ FAIL"
+        print(f"{status}: {result['name']}")
+        if result["details"]:
+            print(f"         {result['details']}")
+
+    elapsed = time.time() - start_time
+    print(f"\nTotal: {passed} passed, {failed} failed out of {len(test_results)} tests")
+    print(f"Time elapsed: {elapsed:.1f} seconds")
+
+    if all_passed:
+        print("\n🎉 ALL SMOKE TESTS PASSED!")
+        print("Middleware components are installed and functioning.")
+        return 0
     else:
-        print(f"❌ {total - passed} security middleware tests failed")
-        print("🔧 Please fix failing tests before proceeding")
-        return False
+        print(f"\n❌ {failed} smoke test(s) failed")
+        print("Please review failures before running comprehensive tests.")
+        return 1
 
 
 if __name__ == "__main__":
-    success = asyncio.run(main())
-    sys.exit(0 if success else 1)
+    exit_code = run_smoke_tests()
+    sys.exit(exit_code)

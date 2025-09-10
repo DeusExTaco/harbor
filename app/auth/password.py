@@ -8,7 +8,7 @@ Implements OWASP best practices for password security.
 
 import secrets
 
-from argon2 import PasswordHasher
+from argon2 import PasswordHasher as Argon2PasswordHasher
 from argon2.exceptions import InvalidHash, VerificationError, VerifyMismatchError
 
 from app.config import get_settings
@@ -19,13 +19,60 @@ logger = get_logger(__name__)
 
 # Argon2id configuration following OWASP recommendations
 # Memory: 64MB, iterations: 3, parallelism: 4
-_password_hasher = PasswordHasher(
+_password_hasher = Argon2PasswordHasher(
     memory_cost=65536,  # 64MB
     time_cost=3,  # 3 iterations
     parallelism=4,  # 4 parallel threads
     hash_len=32,  # 32 byte hash
     salt_len=16,  # 16 byte salt
 )
+
+
+class PasswordHasher:
+    """
+    Simple password hasher wrapper for compatibility with tests.
+
+    This class provides hash() and verify() methods that match
+    what the tests expect.
+    """
+
+    def __init__(self):
+        """Initialize with the global hasher."""
+        self.hasher = _password_hasher
+
+    def hash(self, password: str) -> str:
+        """
+        Hash a password and return the hash.
+
+        Args:
+            password: Plain text password to hash
+
+        Returns:
+            The hashed password string
+        """
+        if not password:
+            raise ValueError("Password cannot be empty")
+        return self.hasher.hash(password)
+
+    def verify(self, password: str, hashed: str) -> bool:
+        """
+        Verify a password against a hash.
+
+        Args:
+            password: Plain text password to verify
+            hashed: The hash to verify against
+
+        Returns:
+            True if password matches, False otherwise
+        """
+        if not password or not hashed:
+            return False
+
+        try:
+            self.hasher.verify(hashed, password)
+            return True
+        except (VerifyMismatchError, VerificationError, InvalidHash):
+            return False
 
 
 class PasswordManager:

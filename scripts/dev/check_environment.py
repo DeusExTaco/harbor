@@ -60,7 +60,6 @@ def check_project_structure():
         "app/security/rate_limit.py",
         "app/security/validation.py",
         "app/utils/__init__.py",
-        "app/utils/logging.py",
         "app/middleware/__init__.py",
         "app/middleware/authentication.py",
         "app/middleware/request_logging.py",

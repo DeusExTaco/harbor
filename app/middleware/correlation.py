@@ -1,4 +1,3 @@
-# app/middleware/correlation.py
 """
 Harbor Correlation ID Middleware
 
@@ -27,34 +26,28 @@ class CorrelationMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         """Process request with correlation ID."""
 
-        # Check if RequestLoggingMiddleware already set a request_id
-        if hasattr(request.state, "request_id"):
-            correlation_id = request.state.request_id
-        else:
-            # Generate or extract correlation ID
-            correlation_id = (
-                request.headers.get("X-Correlation-ID")
-                or request.headers.get("X-Request-ID")
-                or str(uuid.uuid4())
-            )
-            # Set for other middleware to use
-            request.state.request_id = correlation_id
+        # Extract correlation ID from headers or generate new one
+        correlation_id = (
+            request.headers.get("X-Correlation-ID")
+            or request.headers.get("X-Request-ID")
+            or str(uuid.uuid4())
+        )
+
+        # Store in request state for other middleware and endpoints
+        request.state.correlation_id = correlation_id
+        request.state.request_id = correlation_id  # For compatibility
 
         # Set correlation ID in context for all logs in this request
         set_correlation_id(correlation_id)
-
-        # Also store as correlation_id for clarity
-        request.state.correlation_id = correlation_id
 
         # Process request
         response = await call_next(request)
 
         # Add correlation ID to response headers
-        if "X-Request-ID" not in response.headers:
-            response.headers["X-Request-ID"] = correlation_id
         response.headers["X-Correlation-ID"] = correlation_id
+        response.headers["X-Request-ID"] = correlation_id
 
-        # Clear correlation ID after request
+        # Clear correlation ID after request (important for context cleanup)
         set_correlation_id("")
 
         return response

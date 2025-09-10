@@ -68,15 +68,17 @@ async def require_auth(
 ) -> User:
     """
     Dependency that requires an authenticated user.
+    Also checks that the user account is active.
 
     Args:
         user: User from get_current_user dependency
 
     Returns:
-        User object if authenticated
+        User object if authenticated and active
 
     Raises:
         HTTPException: 401 if not authenticated
+        HTTPException: 403 if authenticated but inactive
     """
     if not user:
         logger.warning("Authentication required but no user found")
@@ -85,6 +87,15 @@ async def require_auth(
             detail="Authentication required",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Check if user is active
+    if not user.is_active:
+        logger.warning(f"User {user.username} is not active")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive",
+        )
+
     return user
 
 
@@ -93,6 +104,7 @@ async def require_admin(
 ) -> User:
     """
     Dependency that requires an admin user.
+    Note: User must already be authenticated and active (via require_auth).
 
     Args:
         user: User from require_auth dependency
@@ -117,6 +129,10 @@ async def optional_auth(
 ) -> User | None:
     """
     Optional authentication - doesn't fail if no auth provided.
+    Note: This does NOT check if the user is active, since it's optional.
+
+    If you need to check for active users in optional auth scenarios,
+    check user.is_active manually after calling this dependency.
 
     Args:
         user: User from get_current_user dependency

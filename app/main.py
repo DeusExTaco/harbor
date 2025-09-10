@@ -387,6 +387,7 @@ def create_app() -> FastAPI:
             logger.info("Correlation middleware not available yet")
 
         # Add request logging middleware (runs first to log all requests)
+
         app.add_middleware(RequestLoggingMiddleware)
 
         # Add authentication middleware (checks auth requirements)
